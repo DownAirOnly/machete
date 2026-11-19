@@ -2,7 +2,7 @@
 
 Mobile-first, installable Amazon purchasing-history and price-comparison PWA, designed to match the lowercase logo family of Everyday, Command, and the portfolio.
 
-**v3.0.0 — November 19, 2026**
+**v3.1.0 — November 19, 2026**
 
 ## Works now
 - Import original Amazon **Your Orders.zip** locally in the browser. Reads **Your Amazon Orders/Order History.csv**, **Digital Content Orders.csv**, and **Your Returns & Refunds/Refund Details.csv**. Supports the previous **Retail.OrderHistory.\*.csv** naming as well.
@@ -48,3 +48,17 @@ Connect a properly authorized product catalogue and price-history provider such 
 - \`m.\` now renders as outlined vector artwork rather than a device-dependent font. Includes a raster iPhone home-screen icon.
 
 **Firebase setup:** Google Authentication must be enabled in the Command Firebase project and \`downaironly.github.io\` must be an authorized domain. If a mobile installed PWA blocks a popup, open the site in Safari and sign in there.
+
+
+## v3.1 — Automatic product pictures
+
+Adapted from BOGO's product-photo design with a privacy-preserving client-side approach:
+- Known public photos from the **existing BOGO verified-product photo library** (product title and package matching) are attempted first.
+- Then, category-specific community product catalogs (Open Food Facts, Open Beauty Facts, Open Products Facts, Open Pet Food Facts) are searched for closely matching product names.
+- Image requests are lazy-loaded near visible cards, validated for image dimensions, limited in request rate and cached per Google account. Pictures with weak, missing or conflicting product identity are **not** displayed as matches.
+- User-uploaded product photos and custom HTTPS URLs take priority over auto matches.
+- Each product has a **Retry auto photo** control. Settings shows cached matched/unmatched counts and allows retrying without erasing custom pictures.
+- **Only product names are queried** against public catalogs; the user's ASIN, order ID, pricing, date, and Google account information are not sent to them. The shared public BOGO catalog is downloaded without product-specific queries.
+- No third-party API key, external deployment, paid account, setup task or bulk manual upload required.
+
+**Limitations:** Open catalog coverage varies widely and is generally stronger for packaged food than for specific Amazon hardware/electronics and older listings. This version does **not** promise a picture for all 230 products. The intentionally conservative matching may leave placeholders where an exact picture cannot be verified. Photos use open community data with attribution in the product view and Settings. BOGO's own images were previously found via source-labeled image search and spot-checked, but aren't a guarantee of exact Amazon variants.

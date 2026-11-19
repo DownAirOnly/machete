@@ -1,6 +1,6 @@
 # Machete — project context
 
-Date: 2026-11-19. Current release: **v3.0.0**.
+Date: 2026-11-19. Current release: **v3.1.0**.
 
 Repo: https://github.com/DownAirOnly/machete
 
@@ -54,3 +54,13 @@ Repo: https://github.com/DownAirOnly/machete
 - Logo changed from a dynamic SVG text glyph to a self-contained vector path, keeping black/white/amber identity consistent with portfolio/Command icons.
 - This is an auth gate and account-scoped local data only, **not encrypted at rest and not cloud backup**. Document limitations and Firebase configuration in SECURITY.md. Machete's personal data is never put in GitHub.
 - Next cloud phase must use deployed Firestore security rules for private, UID-bound documents with revisions and conflict detection; do not upload any history until validated.
+
+
+## v3.1 — Product photos
+- New client-side \`product-photos.js\` implements BOGO-inspired progressive verification and caching.
+- Existing BOGO public JSON catalogs (\`data/current-deals.json\`, \`data/deals.json\`) can supply previously checked image files by matching product names/variants (never by fuzzy first token alone).
+- Category-specific Open Facts product catalog APIs supply optional community photo URLs with strict name/brand/pack similarity checks.
+- Images are loaded only near visible cards; lookups are throttled to about 7/minute, verify dimensions, cache success/miss per UID, and allow retry.
+- Manual user-selected image URL/blob always wins.
+- Privacy: only search phrases derived from product title leave the device (no ASIN, order ID, dates, prices, UID); no private purchase catalog is committed to GitHub.
+- Accuracy preference: false negatives are acceptable, false positives not. Remaining missing hardware photos should motivate a future permitted image metadata backend if broad coverage is necessary.

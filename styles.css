@@ -38,3 +38,9 @@ a{color:var(--accent);text-decoration:none}
 .login-gate .note{max-width:350px;margin:15px auto 0}
 .login-error{color:var(--danger);font-size:12px;line-height:1.5;padding:10px;margin:8px 0;background:var(--panel2);border-radius:12px}
 @media(max-width:450px){.login-gate{margin-top:30px;padding:27px 20px}.login-logo{width:94px;height:94px}}
+
+/* v3.1: automatic product image presentation */
+.product-art img,.thumb img,.detail-cover img{object-fit:contain;background:#fff}
+.photo-source-hint{font-size:11px;line-height:1.5;color:var(--muted);margin:12px 0 0}
+.product-art .art-fallback,.thumb .art-fallback,.detail-cover .art-fallback{font-size:28px}
+.product-art img[data-photo-source],.thumb img[data-photo-source],.detail-cover img[data-photo-source]{transition:opacity .16s ease}

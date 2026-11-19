@@ -1,6 +1,6 @@
 'use strict';
 (()=>{
-  const VERSION='3.0.0', LEGACY_KEY='machete.v2', OLD='machete.v1';
+  const VERSION='3.1.0', LEGACY_KEY='machete.v2', OLD='machete.v1';
   let authUser=null;
   const storageKey=()=>authUser?'machete.v3.'+authUser.uid:null;
   const photoKey=key=>authUser?authUser.uid+'::'+key:null;
@@ -136,19 +136,52 @@
     const meta=getMeta(k), url=photoUrl(meta.imageUrl);
     return '<div class="'+(klass||'thumb')+'" data-image-wrap="'+esc(k)+'">'+
       '<span class="art-fallback" aria-hidden="true">m.</span>'+
-      '<img alt="" loading="lazy" style="display:none" data-img-key="'+esc(k)+'" '+(url?'data-remote-img="'+esc(url)+'"':'')+'></div>';
+      '<img alt="" loading="eager" style="display:none" data-img-key="'+esc(k)+'" '+(url?'data-remote-img="'+esc(url)+'"':'')+'></div>';
   }
   function attachImages(){
+    const thisUid=authUser?.uid||'';
+    const titles=new Map();
+    for(const o of state.orders)if(o?.key&&!titles.has(o.key))titles.set(o.key,o.title);
+    for(const w of state.watchlist){
+      const k=productId(w.asin,w.title);
+      if(!titles.has(k))titles.set(k,w.title);
+    }
     for(const img of document.querySelectorAll('[data-img-key]')){
-      const k=img.dataset.imgKey, fallback=img.parentElement.querySelector('.art-fallback');
-      const reveal=()=>{img.style.display='block';if(fallback)fallback.style.display='none';};
-      img.addEventListener('load',reveal,{once:true});
-      img.addEventListener('error',()=>{img.style.display='none';if(fallback)fallback.style.display='block';},{once:true});
-      if(img.dataset.remoteImg)img.src=img.dataset.remoteImg;
-      else getPhoto(k).then(blob=>{
-        if(!blob||!img.isConnected)return;
-        const url=URL.createObjectURL(blob);photoUrls.push(url);img.src=url;
-      }).catch(()=>{});
+      const key=img.dataset.imgKey, fallback=img.parentElement.querySelector('.art-fallback');
+      const reveal=()=>{
+        if(!img.isConnected||authUser?.uid!==thisUid)return;
+        img.style.display='block';if(fallback)fallback.style.display='none';
+        if(img.dataset.photoSource){
+          const label=document.getElementById('auto-photo-source');
+          if(label)label.textContent='Product photo matched through '+img.dataset.photoSource+'.';
+        }
+      };
+      img.addEventListener('load',reveal);
+      img.addEventListener('error',()=>{
+        img.style.display='none';
+        if(fallback)fallback.style.display='block';
+        if(img.dataset.photoSource){
+          window.MachetePhotos?.clear?.(key);
+          delete img.dataset.photoSource;
+        }
+      });
+      if(img.dataset.remoteImg){
+        img.dataset.manualPicture='yes';
+        img.referrerPolicy='no-referrer';
+        img.src=img.dataset.remoteImg;
+      }else getPhoto(key).then(blob=>{
+        if(!img.isConnected||authUser?.uid!==thisUid)return;
+        if(blob){
+          img.dataset.manualPicture='yes';
+          const url=URL.createObjectURL(blob);
+          photoUrls.push(url);img.src=url;
+        }else{
+          window.MachetePhotos?.observe?.(img,key,titles.get(key)||'');
+        }
+      }).catch(()=>{
+        if(img.isConnected&&authUser?.uid===thisUid)
+          window.MachetePhotos?.observe?.(img,key,titles.get(key)||'');
+      });
     }
   }
   function releaseImages(){for(const u of photoUrls)URL.revokeObjectURL(u);photoUrls=[];}
@@ -309,13 +342,18 @@
       '<div class="detail-stat"><b>'+money(per)+'</b><span>Last price per '+esc(meta.unitLabel||'contained unit')+'</span></div>'+
       '<div class="detail-stat"><b>'+money(p.spent)+'</b><span>Total recorded spend on item</span></div></div>'+
       section('Price paid over time','<div class="card">'+trendChart(rows)+'</div>')+
+      '<p id="auto-photo-source" class="photo-source-hint">'+
+      (window.MachetePhotos?.attribution?.(productKey)?.source?
+        'Product photo matched through '+esc(window.MachetePhotos.attribution(productKey).source)+'.':
+        'Automatic photos appear for verified matches. You can override them below.')+
+      '</p>'+
       section('Package and picture','<form id="meta-form" class="card"><div class="form-grid">'+
       '<div class="field"><label for="package-units">Units inside one purchased item</label><input type="number" id="package-units" min=".01" max="1000000" step="any" inputmode="decimal" value="'+esc(meta.packageUnits||'')+'" placeholder="e.g. 24"></div>'+
       '<div class="field"><label for="unit-label">Unit label</label><input id="unit-label" maxlength="25" value="'+esc(meta.unitLabel||'')+'" placeholder="bottle, oz, count…"></div>'+
       '<div class="field"><label for="target-price">Your target price per purchased item</label><input type="number" id="target-price" min=".01" max="1000000" step=".01" inputmode="decimal" value="'+esc(meta.target||w?.target||'')+'" placeholder="$"></div>'+
       '<div class="field wide"><label for="picture-url">Product photo URL (optional)</label><input type="url" id="picture-url" value="'+esc(meta.imageUrl||'')+'" placeholder="https://..."></div></div>'+
-      '<div class="actions"><button type="submit" class="button">Save details</button><button type="button" class="button secondary" data-action="image-upload" data-id="'+esc(p.key)+'">Choose a photo</button></div>'+
-      '<p class="note">Amazon exports do not provide catalog images. Photos you choose stay in this browser; linked image URLs load from their source.</p></form>')+
+      '<div class="actions"><button type="submit" class="button">Save details</button><button type="button" class="button secondary" data-action="image-upload" data-id="'+esc(p.key)+'">Choose a photo</button><button type="button" class="button secondary" data-action="retry-image" data-id="'+esc(p.key)+'">Retry auto photo</button></div>'+
+      '<p class="note">Amazon exports do not provide catalog images. Machete searches BOGO’s verified photo library and open product catalogs using product names only, and shows results only when names match. Your uploaded photos always take priority.</p></form>')+
       section('Purchase records',rows.length?'<div class="history-list">'+rows.map(historyCard).join('')+'</div>':empty('Not purchased yet','This item is on your watchlist. Its actual market price is not tracked yet.'));
   }
   function deals(){
@@ -333,6 +371,14 @@
         '<div class="actions"><button type="button" class="button secondary" data-action="sign-out">Sign out</button></div>'+
         '<p class="note">This is an account-gated local app, not cloud storage. Your purchase history remains on this device and is not encrypted. Signing out hides it, but does not erase it.</p></div>')+
       legacyBanner()+
+      section('Automatic product photos',
+        '<div class="card"><h3>Matching real product packaging</h3>'+
+        '<p>Machete first checks BOGO’s existing verified photo catalog, then searches Open Food Facts and related open catalogs. Photos appear automatically as you browse. Uncertain matches are skipped.</p>'+
+        '<p class="note">'+(window.MachetePhotos?.stats?.().found||0)+' photos matched on this account so far · '+
+        (window.MachetePhotos?.stats?.().missing||0)+' unmatched or unavailable. This is not a count of all products.</p>'+
+        '<div class="actions"><button type="button" class="button secondary" data-action="reset-photos">Retry automatic photo searches</button></div>'+
+        '<p class="note">Only product names are used in public catalog search queries. Your order IDs, dates, prices, and Google account details are not shared with photo providers. This feature uses the network and results vary by catalog.</p>'+
+        '<p class="note">Community product photos: Open Food Facts / Open Beauty Facts / Open Products Facts / Open Pet Food Facts. Source names are shown on matched product details.</p></div>')+
       section('Data and privacy',
         '<div class="card"><h3>Stored separately for each Google account</h3>'+
         '<p>Amazon exports are processed in this browser. The source ZIP, shipping addresses and payment fields are not retained or uploaded. Automatic Firebase cloud sync is not enabled.</p>'+
@@ -573,6 +619,18 @@
       if(a==='google-sign-in'){window.MacheteAuth?.signIn?.().catch(err=>toast(err.message||'Sign-in failed.'));return;}
       if(a==='sign-out'){window.MacheteAuth?.signOut?.().catch(err=>toast(err.message||'Sign-out failed.'));return;}
       if(a==='claim-history'){claimLegacy();return;}
+      if(a==='retry-image'){
+        window.MachetePhotos?.clear?.(action.dataset.id);
+        render();toast('Searching for an updated photo where available.');
+        return;
+      }
+      if(a==='reset-photos'){
+        if(confirm('Retry automatic image searches as you browse? Your chosen photos are not changed.')){
+          window.MachetePhotos?.clear?.();
+          render();toast('Automatic photo cache reset. Matching restarts as you browse.');
+        }
+        return;
+      }
       if(a==='dismiss-legacy'){toast('Old device data was left unchanged.');return;}
       if(!authUser)return;
       if(a==='import')$('#import-file').click();
@@ -629,6 +687,7 @@
     if((nextUser?.uid||null)!==(authUser?.uid||null)){
       releaseImages();
       authUser=nextUser;
+      window.MachetePhotos?.setUser?.(authUser?.uid||'');
       state=authUser?load():emptyState();
       view='home';productKey=null;query='';year='all';kind='all';
     }
@@ -636,6 +695,7 @@
   });
   if(window.MacheteAuth?.ready){
     authUser=window.MacheteAuth.user||null;
+    window.MachetePhotos?.setUser?.(authUser?.uid||'');
     state=authUser?load():emptyState();
   }
   render();
