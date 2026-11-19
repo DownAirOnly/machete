@@ -2,7 +2,7 @@
 
 Mobile-first, installable Amazon purchasing-history and price-comparison PWA, designed to match the lowercase logo family of Everyday, Command, and the portfolio.
 
-**v3.1.0 — November 19, 2026**
+**v3.1.1 — November 19, 2026**
 
 ## Works now
 - Import original Amazon **Your Orders.zip** locally in the browser. Reads **Your Amazon Orders/Order History.csv**, **Digital Content Orders.csv**, and **Your Returns & Refunds/Refund Details.csv**. Supports the previous **Retail.OrderHistory.\*.csv** naming as well.
@@ -62,3 +62,6 @@ Adapted from BOGO's product-photo design with a privacy-preserving client-side a
 - No third-party API key, external deployment, paid account, setup task or bulk manual upload required.
 
 **Limitations:** Open catalog coverage varies widely and is generally stronger for packaged food than for specific Amazon hardware/electronics and older listings. This version does **not** promise a picture for all 230 products. The intentionally conservative matching may leave placeholders where an exact picture cannot be verified. Photos use open community data with attribution in the product view and Settings. BOGO's own images were previously found via source-labeled image search and spot-checked, but aren't a guarantee of exact Amazon variants.
+
+### v3.1.1 photo-search correction
+Full-text searches use Open Facts' documented legacy /cgi/search.pl endpoint because API v2's structured search does not support keyword searching. Provider outages and limited catalog coverage can still leave placeholders.

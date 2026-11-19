@@ -1,6 +1,6 @@
 'use strict';
 (()=>{
-  const VERSION='3.1.0', LEGACY_KEY='machete.v2', OLD='machete.v1';
+  const VERSION='3.1.1', LEGACY_KEY='machete.v2', OLD='machete.v1';
   let authUser=null;
   const storageKey=()=>authUser?'machete.v3.'+authUser.uid:null;
   const photoKey=key=>authUser?authUser.uid+'::'+key:null;

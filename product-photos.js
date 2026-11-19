@@ -206,10 +206,12 @@
     if(delay>0)await new Promise(done=>setTimeout(done,delay));
     if(!uid)return [];
     const params=new URLSearchParams({
-      search_terms:query,page_size:'20',
+      search_terms:query,search_simple:'1',action:'process',json:'1',page_size:'20',
       fields:'code,product_name,product_name_en,brands,image_front_url,image_front_small_url,image_url'
     });
-    const api='https://'+source.host+'/api/v2/search?'+params;
+    // Open Facts API v2 does not support full-text search. Its legacy
+    // /cgi/search.pl endpoint does, although provider downtime may occur.
+    const api='https://'+source.host+'/cgi/search.pl?'+params;
     const data=await timeoutFetch(api);
     const matches=[];
     for(const p of data.products||[]){

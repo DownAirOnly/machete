@@ -1,6 +1,6 @@
 # Machete — project context
 
-Date: 2026-11-19. Current release: **v3.1.0**.
+Date: 2026-11-19. Current release: **v3.1.1**.
 
 Repo: https://github.com/DownAirOnly/machete
 
@@ -64,3 +64,5 @@ Repo: https://github.com/DownAirOnly/machete
 - Manual user-selected image URL/blob always wins.
 - Privacy: only search phrases derived from product title leave the device (no ASIN, order ID, dates, prices, UID); no private purchase catalog is committed to GitHub.
 - Accuracy preference: false negatives are acceptable, false positives not. Remaining missing hardware photos should motivate a future permitted image metadata backend if broad coverage is necessary.
+
+Photo-search hotfix v3.1.1: use Open Facts legacy /cgi/search.pl?search_terms=...&search_simple=1&action=process&json=1, not unsupported v2 full-text search. Keep conservative image matching and rate limit.
