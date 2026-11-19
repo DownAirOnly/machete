@@ -1,6 +1,6 @@
 # Machete — project context
 
-Date: 2026-11-19. Current release: **v2.0.0**.
+Date: 2026-11-19. Current release: **v2.0.1**.
 
 Repo: https://github.com/DownAirOnly/machete
 

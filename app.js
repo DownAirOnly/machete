@@ -1,6 +1,6 @@
 'use strict';
 (()=>{
-  const VERSION='2.0.0', KEY='machete.v2', OLD='machete.v1';
+  const VERSION='2.0.1', KEY='machete.v2', OLD='machete.v1';
   const $=s=>document.querySelector(s), screen=$('#screen'), overlay=$('#overlay'), toastNode=$('#toast');
   const emptyState=()=>({orders:[],watchlist:[],meta:{},theme:'dark',importedAt:null});
   let view='home', productKey=null, query='', year='all', kind='all', sort='recent', toastTimer=0, photoUrls=[];
@@ -349,7 +349,7 @@
       const v=num(r.amount_usd);
       const q=Math.max(1,num(r.quantity,1));
       return record({asin:r.asin||r.ASIN,title:r.description||r.name,date:r.date,orderId:r.order_id,qty:q,
-        unitPrice:kind==='refund'?null:(v==null?null:Math.abs(v)/q),total:v,kind,
+        unitPrice:null,total:v,kind,
         status:kind==='refund'?'refunded':/cancel/i.test(r.status||'')?'cancelled':/pending|author/i.test(r.status||'')?'pending':'completed'});
     }).filter(Boolean);
   }
@@ -463,7 +463,7 @@
   function openPhotoPicker(key){const input=$('#image-file');input.dataset.key=key;input.click();}
   async function storePhoto(file,key){
     if(!file||!key)return;
-    try{const blob=await resizePhoto(file);await putPhoto(key,blob);render();toast('Product photo saved on this device.');}
+    try{const blob=await resizePhoto(file);await putPhoto(key,blob);state.meta[key]={...getMeta(key),imageUrl:''};save();render();toast('Product photo saved on this device.');}
     catch(e){toast(e.message||'Could not save photo.');}
     finally{$('#image-file').value='';}
   }
@@ -481,7 +481,7 @@
       }
       return;
     }
-    const theme=event.target.closest('[data-theme]');
+    const theme=event.target.closest('button[data-theme]');
     if(theme){state.theme=theme.dataset.theme;save();render();}
   });
   document.addEventListener('input',event=>{
