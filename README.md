@@ -2,7 +2,7 @@
 
 Mobile-first, installable Amazon purchasing-history and price-comparison PWA, designed to match the lowercase logo family of Everyday, Command, and the portfolio.
 
-**v2.0.1 — November 19, 2026**
+**v3.0.0 — November 19, 2026**
 
 ## Works now
 - Import original Amazon **Your Orders.zip** locally in the browser. Reads **Your Amazon Orders/Order History.csv**, **Digital Content Orders.csv**, and **Your Returns & Refunds/Refund Details.csv**. Supports the previous **Retail.OrderHistory.\*.csv** naming as well.
@@ -38,3 +38,13 @@ This is a static PWA, using relative asset URLs for GitHub Pages under \`https:/
 
 ## Potential next phase
 Connect a properly authorized product catalogue and price-history provider such as Keepa, using a backend to protect paid API credentials, for product images, continuously recorded prices, and true deal verification. For incremental new purchases, prefer reimporting a newer original ZIP or a structured browser share/export flow; OCR should be a fallback for receipts/screenshots, not the primary source.
+
+
+## v3 Google Authentication & branding
+- Google sign-in uses Firebase Authentication's existing Command project (\`command-c8162\`), with no Firestore write or read.
+- Signed-out users see a login gate, not purchase history. Each signed-in UID receives separate device-local history and image keys.
+- Old anonymous Machete history is only moved when a signed-in user explicitly chooses to attach it. Back up first if needed.
+- Security limitation: Google authentication gates the UI but **does not encrypt device storage** and **does not sync your data to Firebase**. See [SECURITY.md](./SECURITY.md).
+- \`m.\` now renders as outlined vector artwork rather than a device-dependent font. Includes a raster iPhone home-screen icon.
+
+**Firebase setup:** Google Authentication must be enabled in the Command Firebase project and \`downaironly.github.io\` must be an authorized domain. If a mobile installed PWA blocks a popup, open the site in Safari and sign in there.

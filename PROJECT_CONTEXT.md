@@ -1,6 +1,6 @@
 # Machete — project context
 
-Date: 2026-11-19. Current release: **v2.0.1**.
+Date: 2026-11-19. Current release: **v3.0.0**.
 
 Repo: https://github.com/DownAirOnly/machete
 
@@ -42,3 +42,15 @@ Repo: https://github.com/DownAirOnly/machete
 2. Improve package detection (count / weight / volume / multipacks) and comparable per-unit prices; review inferred unit metadata rather than guessing.
 3. Smarter recurring history update (Amazon export reimport or optional account-connected source) with clear dedup/report.
 4. OCR of order screenshots/receipts only when structured extraction unavailable.
+
+
+## v3.0 update — Google account gate and logo
+
+- Authentication via existing Command Firebase project (\`command-c8162\`) using Firebase Web SDK v13.2.0 and Google popup.
+- New files: \`firebase-config.js\`, \`auth.js\`, \`SECURITY.md\`. No Firestore writes or access.
+- App screens and import are hidden until Google Auth resolves with a verified user.
+- Account-local data is keyed \`machete.v3.<uid>\` and IndexedDB product photos use \`<uid>::<productKey>\`.
+- Migration from anonymous \`machete.v2\` / \`machete.v1\` happens only when a signed-in account explicitly claims that previous on-device data. It should not be automatically assigned to whichever user signs in first.
+- Logo changed from a dynamic SVG text glyph to a self-contained vector path, keeping black/white/amber identity consistent with portfolio/Command icons.
+- This is an auth gate and account-scoped local data only, **not encrypted at rest and not cloud backup**. Document limitations and Firebase configuration in SECURITY.md. Machete's personal data is never put in GitHub.
+- Next cloud phase must use deployed Firestore security rules for private, UID-bound documents with revisions and conflict detection; do not upload any history until validated.

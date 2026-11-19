@@ -1,1 +1,25 @@
-{"name":"Machete — Amazon history & price tracker","short_name":"Machete","description":"Private Amazon purchase history, price per unit, watchlist and deal tracking.","id":"./","start_url":"./","scope":"./","display":"standalone","background_color":"#101416","theme_color":"#101416","icons":[{"src":"./icon.svg?v=2","type":"image/svg+xml","sizes":"any","purpose":"any maskable"}]}
+{
+  "name": "Machete — Amazon history & price tracker",
+  "short_name": "Machete",
+  "description": "Private Amazon purchase history, price per unit, watchlist and deal tracking.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#101416",
+  "theme_color": "#101416",
+  "icons": [
+    {
+      "src": "./icon.svg?v=3",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./apple-touch-icon.png?v=3",
+      "type": "image/png",
+      "sizes": "180x180",
+      "purpose": "any"
+    }
+  ]
+}

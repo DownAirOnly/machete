@@ -1,6 +1,9 @@
 'use strict';
 (()=>{
-  const VERSION='2.0.1', KEY='machete.v2', OLD='machete.v1';
+  const VERSION='3.0.0', LEGACY_KEY='machete.v2', OLD='machete.v1';
+  let authUser=null;
+  const storageKey=()=>authUser?'machete.v3.'+authUser.uid:null;
+  const photoKey=key=>authUser?authUser.uid+'::'+key:null;
   const $=s=>document.querySelector(s), screen=$('#screen'), overlay=$('#overlay'), toastNode=$('#toast');
   const emptyState=()=>({orders:[],watchlist:[],meta:{},theme:'dark',importedAt:null});
   let view='home', productKey=null, query='', year='all', kind='all', sort='recent', toastTimer=0, photoUrls=[];
@@ -20,30 +23,84 @@
   const productId=(asin,title)=>asinOk(asin)?String(asin).toUpperCase():'title-'+hash(slug(title));
   const amazonUrl=asin=>asinOk(asin)?'https://www.amazon.com/dp/'+encodeURIComponent(asin):null;
   const photoUrl=url=>{try{const u=new URL(String(url||''));return u.protocol==='https:'&&u.username===''&&u.password===''&&/^https?:$/.test(u.protocol)?u.href:'';}catch{return '';}};
-  function load(){
-    try{
-      const x=JSON.parse(localStorage.getItem(KEY));
-      if(x&&Array.isArray(x.orders)&&Array.isArray(x.watchlist))return {
-        orders:x.orders.filter(o=>o&&typeof o.id==='string'&&typeof o.title==='string').slice(0,50000),
-        watchlist:x.watchlist.filter(w=>w&&typeof w.id==='string').slice(0,3000),
-        meta:x.meta&&typeof x.meta==='object'&&!Array.isArray(x.meta)?x.meta:{},
-        theme:x.theme==='light'?'light':'dark',importedAt:x.importedAt||null};
-    }catch(e){console.warn('Machete: could not read saved data',e);}
-    const fresh=emptyState();
-    try{
-      const old=JSON.parse(localStorage.getItem(OLD));
-      if(old&&Array.isArray(old.items)){
-        fresh.watchlist=old.items.filter(x=>x&&asinOk(x.asin)).map(x=>({id:x.id||uniqueId(),asin:x.asin,title:x.title||'Amazon product',target:num(x.targetPrice),createdAt:x.createdAt||new Date().toISOString()}));
-        fresh.theme=old.theme==='light'?'light':'dark';
-      }
-    }catch(e){/* no legacy data */}
-    return fresh;
+  function normalizeState(x){
+    if(!x||!Array.isArray(x.orders)||!Array.isArray(x.watchlist))return emptyState();
+    return {
+      orders:x.orders.filter(o=>o&&typeof o.id==='string'&&typeof o.title==='string').slice(0,50000),
+      watchlist:x.watchlist.filter(w=>w&&typeof w.id==='string').slice(0,3000),
+      meta:x.meta&&typeof x.meta==='object'&&!Array.isArray(x.meta)?x.meta:{},
+      theme:x.theme==='light'?'light':'dark',importedAt:x.importedAt||null
+    };
   }
-  let state=load();
+  function load(){
+    if(!authUser)return emptyState();
+    try{return normalizeState(JSON.parse(localStorage.getItem(storageKey())));}
+    catch(err){console.warn('Machete account data could not be opened',err);return emptyState();}
+  }
+  let state=emptyState();
   const save=()=>{
-    try{localStorage.setItem(KEY,JSON.stringify(state));return true;}
+    if(!authUser){toast('Sign in to save your changes.');return false;}
+    try{localStorage.setItem(storageKey(),JSON.stringify(state));return true;}
     catch(e){toast('Cannot save. Device storage may be full; export a backup.');return false;}
   };
+  function oldDeviceData(){
+    try{
+      const current=JSON.parse(localStorage.getItem(LEGACY_KEY));
+      if(current&&Array.isArray(current.orders)&&Array.isArray(current.watchlist))return normalizeState(current);
+      const prev=JSON.parse(localStorage.getItem(OLD));
+      if(prev&&Array.isArray(prev.items)){
+        const result=emptyState();result.theme=prev.theme==='light'?'light':'dark';
+        result.watchlist=prev.items.filter(w=>w&&asinOk(w.asin)).map(w=>({
+          id:w.id||uniqueId(),asin:w.asin,title:w.title||'Amazon product '+w.asin,
+          target:num(w.targetPrice),createdAt:w.createdAt||new Date().toISOString()
+        }));
+        return result;
+      }
+    }catch(err){console.warn('Existing unclaimed data could not be parsed',err);}
+    return null;
+  }
+  function legacyBanner(){
+    const old=oldDeviceData();
+    if(!old||(old.orders.length===0&&old.watchlist.length===0))return '';
+    return section('Previous device history',
+      '<div class="card"><h3>Existing Machete data found on this device</h3>'+
+      '<p>This history was saved before Google sign-in was added. Choose which Google account it belongs to. It will not be moved automatically.</p>'+
+      '<div class="actions"><button type="button" class="button" data-action="claim-history">Attach to this account</button>'+
+      '<button type="button" class="button secondary" data-action="dismiss-legacy">Not now</button></div></div>');
+  }
+  async function claimLegacy(){
+    if(!authUser)return;
+    const owningUid=authUser.uid;
+    const old=oldDeviceData();
+    if(!old)return toast('No previous history was found.');
+    if(!confirm('Attach the existing on-device history to '+authUser.email+'? This account will own the local copy.'))return;
+    const previous=state;
+    const byId=new Map(state.orders.map(o=>[o.id,o]));
+    for(const order of old.orders)if(!byId.has(order.id))byId.set(order.id,order);
+    const watches=new Map(state.watchlist.map(w=>[w.asin,w]));
+    for(const w of old.watchlist)if(!watches.has(w.asin))watches.set(w.asin,w);
+    state={orders:Array.from(byId.values()),watchlist:Array.from(watches.values()),
+      meta:{...old.meta,...state.meta},theme:state.theme,
+      importedAt:state.importedAt||old.importedAt};
+    if(!save()){state=previous;return;}
+    // Copy previously selected photos into this account's namespaced image store.
+    const keys=new Set([...Object.keys(old.meta),
+      ...old.orders.map(o=>o.key),...old.watchlist.map(w=>productId(w.asin,w.title))]);
+    let copied=0;
+    for(const key of keys){
+      try{
+        if(authUser?.uid!==owningUid)break;
+        const photo=await getPhotoRaw(key);
+        if(authUser?.uid!==owningUid)break;
+        if(photo){await putPhoto(key,photo);copied++;}
+      }catch(err){console.warn('Could not migrate one local product photo',err);}
+    }
+    if(authUser?.uid!==owningUid)return;
+    localStorage.removeItem(LEGACY_KEY);
+    localStorage.removeItem(OLD);
+    render();
+    toast('Previous history attached to your Google account'+(copied?' with '+copied+' photos':'')+'.');
+  }
   function toast(msg){toastNode.textContent=msg;toastNode.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>toastNode.classList.remove('show'),3600);}
   const isSpend=o=>o.status==='completed'||o.status==='refunded';
   const paid=o=>o.status==='refunded'?(o.total||0):o.status==='completed'?(o.total||0):0;
@@ -104,7 +161,8 @@
       request.onerror=()=>reject(request.error);
     });
   }
-  async function getPhoto(key){
+  async function getPhotoRaw(key){
+    if(!key)return null;
     const db=await openDB();
     return new Promise((resolve,reject)=>{
       const tx=db.transaction('images','readonly');
@@ -113,11 +171,12 @@
       tx.oncomplete=()=>db.close();
     });
   }
+  async function getPhoto(key){return getPhotoRaw(photoKey(key));}
   async function putPhoto(key,blob){
     const db=await openDB();
     return new Promise((resolve,reject)=>{
       const tx=db.transaction('images','readwrite');
-      tx.objectStore('images').put(blob,key);
+      tx.objectStore('images').put(blob,photoKey(key));
       tx.oncomplete=()=>{db.close();resolve();};
       tx.onerror=()=>{db.close();reject(tx.error);};
     });
@@ -155,7 +214,7 @@
     return '<section class="hero"><p class="kicker">Machete · '+VERSION+'</p><h1 class="page-title">Know what you paid.</h1><p class="sub">Your Amazon history, real purchase prices, and a better way to compare what things cost.</p>'+
       '<div class="actions">'+importButton(state.orders.length?'Update history':'Import your history')+'<button class="button secondary" type="button" data-view="products">Browse products</button></div></section>'+
       '<div class="metrics"><div class="metric"><div class="metric-value">'+money(m.spent)+'</div><div class="metric-label">Net exported spend</div></div><div class="metric"><div class="metric-value">'+m.count+'</div><div class="metric-label">Completed item entries</div></div><div class="metric"><div class="metric-value">'+m.unique+'</div><div class="metric-label">Unique products bought</div></div></div>'+
-      section('Spending by year','<div class="card">'+yearlyChart()+'<p class="note">Completed retail and digital item totals, minus recorded refunds. Not a bank reconciliation.</p></div>')+
+      legacyBanner()+section('Spending by year','<div class="card">'+yearlyChart()+'<p class="note">Completed retail and digital item totals, minus recorded refunds. Not a bank reconciliation.</p></div>')+
       section('Recent purchases',recent.length?'<div class="history-list">'+recent.map(historyCard).join('')+'</div>':empty('Your history is empty','Import the original Amazon Your Orders.zip file directly. It stays in this browser.',importButton()),'<button class="button quiet" data-view="history">View all</button>')+
       section('Import progress','<div class="card"><h3>'+(state.importedAt?'Last imported '+esc(shortDate(state.importedAt)):'Ready for your first import')+'</h3><p>Import an updated file whenever you receive one. Previous entries are deduplicated, so you keep a rolling history without OCR.</p><div class="actions">'+importButton('Choose ZIP or CSV')+'</div></div>');
   }
@@ -266,12 +325,40 @@
       section('Market history — planned','<div class="card"><h3>Real historical pricing needs a separate source</h3><p>The Amazon order export only records what you bought. An authenticated historical-price provider is needed for daily price histories, deals, alerts, and automatic product photos.</p><p>For now, Machete does not invent a current price or present a guess as a bargain.</p></div>');
   }
   function settings(){
-    return headline('Preferences','Settings<span style="color:var(--accent)">.</span>','Data portability, appearance, and import controls.')+
-      section('Data and privacy','<div class="card"><h3>Stored privately on this device</h3><p>Import runs entirely in the browser. Addresses, payment methods, order-export delivery photos, and the original ZIP are not retained. No Amazon data is included in the public source repository.</p>'+
-      '<div class="actions">'+importButton('Import ZIP / CSV / backup')+'<button class="button secondary" data-action="backup">Export complete backup</button><button class="button danger" data-action="clear">Delete local history</button></div>'+
-      '<p class="note">A complete backup is a ZIP containing Machete data and any locally uploaded product photos. Import an existing ZIP to restore it.</p></div>')+
-      section('Appearance','<div class="card"><h3>Theme</h3><div class="actions"><button type="button" class="button '+(state.theme==='dark'?'':'secondary')+'" data-theme="dark">Dark</button><button type="button" class="button '+(state.theme==='light'?'':'secondary')+'" data-theme="light">Light</button></div></div>')+
-      section('About','<div class="card"><h3>Machete v'+VERSION+'</h3><p>Amazon order history, paid unit prices, recurring imports, catalog, local photos, and watchlist. Automatic live market pricing, photo retrieval, OCR, and cross-device sync are not connected.</p><div class="actions"><a href="https://github.com/DownAirOnly/machete" target="_blank" rel="noopener noreferrer" class="button secondary">View source</a></div></div>');
+    const account=authUser||{email:''};
+    return headline('Preferences','Settings<span style="color:var(--accent)">.</span>','Account controls, data portability, and appearance.')+
+      section('Google account',
+        '<div class="card"><div class="row between"><div><h3>Signed in with Google</h3>'+
+        '<p>'+esc(account.email)+'</p></div><span class="tag orange">Signed in</span></div>'+
+        '<div class="actions"><button type="button" class="button secondary" data-action="sign-out">Sign out</button></div>'+
+        '<p class="note">This is an account-gated local app, not cloud storage. Your purchase history remains on this device and is not encrypted. Signing out hides it, but does not erase it.</p></div>')+
+      legacyBanner()+
+      section('Data and privacy',
+        '<div class="card"><h3>Stored separately for each Google account</h3>'+
+        '<p>Amazon exports are processed in this browser. The source ZIP, shipping addresses and payment fields are not retained or uploaded. Automatic Firebase cloud sync is not enabled.</p>'+
+        '<div class="actions">'+importButton('Import ZIP / CSV / backup')+
+        '<button class="button secondary" data-action="backup">Export complete backup</button>'+
+        '<button class="button danger" data-action="clear">Delete account history on this device</button></div>'+
+        '<p class="note">Export a backup before changing devices or clearing Safari website data. A ZIP includes your history and local product photos.</p></div>')+
+      section('Appearance','<div class="card"><h3>Theme</h3><div class="actions">'+
+        '<button type="button" class="button '+(state.theme==='dark'?'':'secondary')+'" data-theme="dark">Dark</button>'+
+        '<button type="button" class="button '+(state.theme==='light'?'':'secondary')+'" data-theme="light">Light</button></div></div>')+
+      section('About','<div class="card"><h3>Machete v'+VERSION+'</h3>'+
+        '<p>Google Authentication, account-separated local history, custom app icon, purchase records and product price comparisons. Automatic cloud sync and at-rest encryption are not implemented.</p>'+
+        '<div class="actions"><a href="https://github.com/DownAirOnly/machete" target="_blank" rel="noopener noreferrer" class="button secondary">View source</a></div></div>');
+  }
+  function loginView(){
+    const auth=window.MacheteAuth||{status:'initializing',ready:false,error:''};
+    const loading=!auth.ready||auth.status==='initializing';
+    return '<section class="login-gate"><img class="login-logo" src="./icon.svg?v=3" width="112" height="112" alt="Machete m dot icon">'+
+      '<p class="kicker">Your private purchase history</p>'+
+      '<h1 class="page-title">Welcome to machete<span style="color:var(--accent)">.</span></h1>'+
+      '<p class="sub">Sign in with Google before viewing or importing your Amazon purchases.</p>'+
+      '<button type="button" class="button google-button" data-action="google-sign-in" '+(loading?'disabled':'')+'>'+
+      '<span class="google-mark" aria-hidden="true">G</span>'+(loading?'Checking Google account…':'Continue with Google')+'</button>'+
+      (auth.error?'<p class="login-error" role="alert">'+esc(auth.error)+'</p>':'')+
+      '<p class="note">Machete keeps your order history on this device, separate for each Google account. Signing in does not upload or encrypt data.</p>'+
+      '</section>';
   }
   function navigate(next){
     view=next;productKey=null;query='';year='all';kind='all';sort='recent';render();
@@ -279,12 +366,15 @@
   }
   function render(){
     syncTheme();releaseImages();
-    screen.innerHTML=({home,history,products:productsView,deals,settings,detail:details}[view]||home)();
+    const loggedIn=!!authUser && !!window.MacheteAuth?.user;
+    screen.innerHTML=loggedIn?({home,history,products:productsView,deals,settings,detail:details}[view]||home)():loginView();
+    const nav=document.querySelector('.tabbar');
+    nav.hidden=!loggedIn;
     document.querySelectorAll('.tab').forEach(el=>{
       const active=el.dataset.view===view||(view==='detail'&&el.dataset.view==='products');
       el.classList.toggle('active',active);if(active)el.setAttribute('aria-current','page');else el.removeAttribute('aria-current');
     });
-    attachImages();
+    if(loggedIn)attachImages();
   }
   function record(values){
     const title=String(values.title||'Unnamed item').trim().slice(0,400);
@@ -406,6 +496,8 @@
   }
   async function importFile(file){
     if(!file)return;
+    const owningUid=authUser?.uid;
+    if(!owningUid)return toast('Sign in before importing history.');
     if(file.size>40000000){toast('File too large (40 MB maximum).');return;}
     toast('Reading history on your device…');
     try{
@@ -417,6 +509,7 @@
         if(data.app!=='machete'||!Array.isArray(data.orders))throw Error('This is not a Machete history JSON file.');
         imported={records:data.orders,backup:data};
       }else throw Error('Choose an Amazon ZIP, CSV, or Machete backup.');
+      if(authUser?.uid!==owningUid)throw Error('Account changed during import. Nothing was saved.');
       const old=JSON.parse(JSON.stringify(state));
       const merged=mergeRecords(imported.records);
       state.orders=merged.orders;
@@ -438,6 +531,8 @@
     finally{$('#import-file').value='';}
   }
   async function exportBackup(){
+    const owningUid=authUser?.uid;
+    if(!owningUid)return toast('Sign in to export your history.');
     try{
       if(!window.JSZip)throw Error('ZIP support unavailable. Refresh the page.');
       const zip=new JSZip();
@@ -448,6 +543,7 @@
         if(image)zip.file('photos/'+key+'.jpg',image);
       }
       const blob=await zip.generateAsync({type:'blob',compression:'DEFLATE'});
+      if(authUser?.uid!==owningUid)throw Error('Account changed before backup finished.');
       downloadBlob(blob,'machete-backup-'+new Date().toISOString().slice(0,10)+'.zip');
       toast('Complete backup exported.');
     }catch(e){toast(e.message||'Backup failed.');}
@@ -463,7 +559,9 @@
   function openPhotoPicker(key){const input=$('#image-file');input.dataset.key=key;input.click();}
   async function storePhoto(file,key){
     if(!file||!key)return;
-    try{const blob=await resizePhoto(file);await putPhoto(key,blob);state.meta[key]={...getMeta(key),imageUrl:''};save();render();toast('Product photo saved on this device.');}
+    const owningUid=authUser?.uid;
+    if(!owningUid)return toast('Sign in before choosing a photo.');
+    try{const blob=await resizePhoto(file);if(authUser?.uid!==owningUid)return;await putPhoto(key,blob);if(authUser?.uid!==owningUid)return;state.meta[key]={...getMeta(key),imageUrl:''};save();render();toast('Product photo saved on this device.');}
     catch(e){toast(e.message||'Could not save photo.');}
     finally{$('#image-file').value='';}
   }
@@ -472,6 +570,11 @@
     const pr=event.target.closest('[data-product]');if(pr){productKey=pr.dataset.product;view='detail';render();window.scrollTo(0,0);return;}
     const action=event.target.closest('[data-action]');if(action){
       const a=action.dataset.action;
+      if(a==='google-sign-in'){window.MacheteAuth?.signIn?.().catch(err=>toast(err.message||'Sign-in failed.'));return;}
+      if(a==='sign-out'){window.MacheteAuth?.signOut?.().catch(err=>toast(err.message||'Sign-out failed.'));return;}
+      if(a==='claim-history'){claimLegacy();return;}
+      if(a==='dismiss-legacy'){toast('Old device data was left unchanged.');return;}
+      if(!authUser)return;
       if(a==='import')$('#import-file').click();
       if(a==='backup')exportBackup();
       if(a==='image-upload')openPhotoPicker(action.dataset.id);
@@ -521,6 +624,20 @@
   $('#import-file').addEventListener('change',e=>importFile(e.target.files[0]));
   $('#image-file').addEventListener('change',e=>storePhoto(e.target.files[0],e.target.dataset.key));
   document.addEventListener('keydown',e=>{if(e.key==='Escape')overlay.innerHTML='';});
+  window.addEventListener('machete-auth-changed',()=>{
+    const nextUser=window.MacheteAuth?.user||null;
+    if((nextUser?.uid||null)!==(authUser?.uid||null)){
+      releaseImages();
+      authUser=nextUser;
+      state=authUser?load():emptyState();
+      view='home';productKey=null;query='';year='all';kind='all';
+    }
+    render();
+  });
+  if(window.MacheteAuth?.ready){
+    authUser=window.MacheteAuth.user||null;
+    state=authUser?load():emptyState();
+  }
   render();
-  if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js?v=2').catch(console.warn));
+  if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js?v=3').catch(console.warn));
 })();
