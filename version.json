@@ -1,5 +1,5 @@
 {
-  "version": "3.1.1",
+  "version": "3.1.2",
   "releaseDate": "2026-11-19",
-  "releaseName": "Product photo lookup hotfix"
+  "releaseName": "Repair image matching and expose photo lookup diagnostics"
 }

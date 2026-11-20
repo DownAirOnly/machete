@@ -12,7 +12,7 @@
  * Missing and ambiguous matches intentionally retain a neutral placeholder.
  */
 (()=>{
-  const VERSION=1, CACHE_PREFIX='machete-photo-index-v'+VERSION+'.';
+  const VERSION=2, CACHE_PREFIX='machete-photo-index-v'+VERSION+'.';
   const BOGO_BASE='https://downaironly.github.io/bogo/';
   const BOGO_CATALOGS=['data/current-deals.json','data/deals.json'];
   const SOURCES=[
@@ -23,7 +23,7 @@
   ];
   const STOP=new Set('the and for with from this that these those item product products amazon amazoncom original new fresh pack package packs count ct each multi set bundle assorted variety flavor flavored size classic plus extra included including single premium best of by at in on to a an oz lb ml l g kg inch inches foot feet x'.split(' '));
   const REJECT=new Set('recipe recipes cooking meal dinner review reviews tutorial poster wallpaper illustration clipart artwork infographic screenshots screenshot template label blank empty before after youtube tiktok pinterest facebook'.split(' '));
-  const BAD=['organic','original','classical'];
+  const diagnostics={attempted:0,matched:0,notFound:0,errors:0,lastError:'',lastSource:'',lastQuery:'',lastSuccess:''};
   let uid='', cache={}, pending=new Map(), lazyObserver=null, scheduled=0, generation=0;
   const waiting=[], queuedKeys=new Set();
   let inflight=0;
@@ -64,7 +64,8 @@
     generation++;
     uid=typeof newUid==='string'?newUid:'';
     cache=uid?readCache():{};
-    pending.clear();waiting.length=0;queuedKeys.clear();
+    pending.clear();waiting.length=0;queuedKeys.clear();scheduled=0;
+    Object.assign(diagnostics,{attempted:0,matched:0,notFound:0,errors:0,lastError:'',lastSource:'',lastQuery:'',lastSuccess:''});
     lazyObserver?.disconnect();lazyObserver=null;
   }
   function cached(key){
@@ -91,7 +92,7 @@
       if(v?.status==='found')found++;
       if(v?.status==='missing')missing++;
     }
-    return {found,missing,waiting:waiting.length};
+    return {found,missing,waiting:waiting.length,active:inflight,...diagnostics};
   };
   const timeoutFetch=async(url,ms=8500)=>{
     const ctrl=new AbortController();
@@ -103,7 +104,7 @@
     }finally{clearTimeout(timeout);}
   };
   // Browser image tags can verify photos from domains without a CORS read.
-  function loadable(src){
+  function loadable(src,timeoutMs=6500){
     return new Promise(resolve=>{
       const url=safeHttps(src);
       if(!url)return resolve(false);
@@ -111,7 +112,7 @@
       im.referrerPolicy='no-referrer';
       im.decoding='async';
       let settled=false;
-      const timer=setTimeout(()=>finish(false),6500);
+      const timer=setTimeout(()=>finish(false),timeoutMs);
       function finish(ok){
         if(settled)return;settled=true;
         clearTimeout(timer);im.onload=null;im.onerror=null;
@@ -132,14 +133,14 @@
     const seen=new Set(got);
     if(!seen.has(wanted[0]))return -1; // Require first strong brand token.
     const hits=wanted.filter(w=>seen.has(w));
-    const minHits=wanted.length<4?2:wanted.length<7?3:4;
+    const minHits=wanted.length<4?2:3;
     if(hits.length<minHits)return -1;
     // If the purchased item says 8pk, a 12pk photo is misleading.
     const importantCounts=wanted.filter(x=>/^\d+pk$/.test(x));
     if(importantCounts.length&&!importantCounts.every(x=>seen.has(x)))return -1;
     const haveCounts=got.filter(x=>/^\d+pk$/.test(x));
     if(haveCounts.length&&importantCounts.length&&haveCounts.some(x=>!importantCounts.includes(x)))return -1;
-    if(wanted.length>5 && hits.length/wanted.length <.45)return -1;
+    // Long Amazon marketing titles need not share every word with catalog names.
     return hits.length*4 + (hits.length/wanted.length)*8 +
       (seen.has(wanted[1])?3:0) -
       (got.length>18?4:0);
@@ -180,6 +181,18 @@
     }
     return null;
   }
+  async function findAmazonByAsin(key){
+    if(!/^[A-Z0-9]{10}$/.test(key))return null;
+    const urls=[
+      'https://images-na.ssl-images-amazon.com/images/P/'+key+'.01._SX300_.jpg',
+      'https://m.media-amazon.com/images/P/'+key+'.01._SX300_.jpg'
+    ];
+    // Older Amazon image aliases may work; newer ASINs often have no alias.
+    const ok=await Promise.all(urls.map(u=>loadable(u,2500)));
+    const i=ok.indexOf(true);
+    return i<0?null:{status:'found',url:urls[i],source:'Amazon ASIN image',
+      sourceUrl:'https://www.amazon.com/dp/'+key,checked:Date.now(),score:100};
+  }
   function catalogSource(title){
     const s=normalize(title);
     if(/\b(dog|cat|kitten|puppy|pet)\b/.test(s)&&/\b(food|treat|kibble)\b/.test(s))return SOURCES[3];
@@ -190,7 +203,7 @@
   function queryFor(title){
     // Avoid searching for full Amazon marketing text. 5 informative tokens
     // are normally enough to find the actual brand/product.
-    return titleTokens(title).slice(0,5).join(' ');
+    return titleTokens(title).slice(0,3).join(' ');
   }
   function imageFromProduct(p){
     return safeHttps(p?.image_front_url)||safeHttps(p?.image_front_small_url)||safeHttps(p?.image_url)||'';
@@ -201,7 +214,7 @@
     // Treat catalog lookup as a rate-limited external API, never as a
     // search-as-you-type request. Max ~7-8 new searches/minute on this device.
     const scheduledTime=Math.max(Date.now(),scheduled);
-    scheduled=scheduledTime+8500;
+    scheduled=scheduledTime+6500;
     const delay=scheduledTime-Date.now();
     if(delay>0)await new Promise(done=>setTimeout(done,delay));
     if(!uid)return [];
@@ -212,7 +225,8 @@
     // Open Facts API v2 does not support full-text search. Its legacy
     // /cgi/search.pl endpoint does, although provider downtime may occur.
     const api='https://'+source.host+'/cgi/search.pl?'+params;
-    const data=await timeoutFetch(api);
+    diagnostics.lastSource=source.label;diagnostics.lastQuery=query;
+    const data=await timeoutFetch(api,9000);
     const matches=[];
     for(const p of data.products||[]){
       const url=imageFromProduct(p);
@@ -232,31 +246,40 @@
     if(pending.has(key))return pending.get(key);
     const searchUid=uid,searchGen=generation;
     const promise=(async()=>{
-      let result=null,hadProviderError=false;
-      try{result=await findBOGO(title);}
-      catch(e){console.debug('BOGO photo source unavailable',e);}
+      diagnostics.attempted++;
+      let result=null,providerError=false;
+      try{result=await findAmazonByAsin(key);}
+      catch(e){console.debug('ASIN image unavailable',e);}
+      if(!result){
+        try{result=await findBOGO(title);}
+        catch(e){diagnostics.errors++;diagnostics.lastError='BOGO: '+(e.message||e);providerError=true;}
+      }
       if(!result){
         let candidates=[];
         try{candidates=await catalogCandidates(title);}
-        catch(e){hadProviderError=true;console.debug('Open product photo source unavailable',e);}
+        catch(e){
+          diagnostics.errors++;providerError=true;
+          diagnostics.lastError=(diagnostics.lastSource||'Product catalog')+': '+String(e?.message||e).slice(0,140);
+          console.debug('Catalog search unavailable',e);
+        }
         for(const candidate of candidates){
           if(searchUid!==uid||searchGen!==generation)break;
-          if(await loadable(candidate.url)){
-            result={status:'found',...candidate,checked:Date.now()};
-            break;
+          if(await loadable(candidate.url,6000)){
+            result={status:'found',...candidate,checked:Date.now()};break;
           }
         }
       }
       if(searchUid!==uid||searchGen!==generation)return null;
-      if(result){cache[key]=result;persist();return result;}
-      cache[key]={status:'missing',checked:Date.now(),
-        retryAfter:hadProviderError?60*60e3:14*86400000};
-      persist();
-      return null;
+      if(result){
+        cache[key]=result;diagnostics.matched++;
+        diagnostics.lastSuccess=title.slice(0,90)+' via '+result.source;
+        persist();window.dispatchEvent(new Event('machete-photo-progress'));return result;
+      }
+      cache[key]={status:'missing',checked:Date.now(),retryAfter:providerError?15*60e3:24*3600e3};
+      diagnostics.notFound++;persist();window.dispatchEvent(new Event('machete-photo-progress'));return null;
     })();
     pending.set(key,promise);
-    try{return await promise;}
-    finally{if(pending.get(key)===promise)pending.delete(key);}
+    try{return await promise;}finally{if(pending.get(key)===promise)pending.delete(key);}
   }
   function queueImage(image,key,title){
     if(!uid||!image?.isConnected||!key||!title||queuedKeys.has(image))return;
@@ -266,7 +289,7 @@
     pump();
   }
   function pump(){
-    while(inflight<2&&waiting.length){
+    while(inflight<3&&waiting.length){
       const work=waiting.shift();
       if(!work.image.isConnected||work.uid!==uid||work.generation!==generation)continue;
       inflight++;
@@ -275,7 +298,7 @@
         // Protect manual/custom images that finished loading while searching.
         if(work.image.dataset.manualPicture==='yes')return;
         work.image.dataset.photoSource=result.source;
-        work.image.src=result.url;
+        work.image.referrerPolicy='no-referrer';work.image.src=result.url;
       }).catch(e=>console.debug('Automatic product photo unavailable',e))
         .finally(()=>{inflight--;pump();});
     }
@@ -283,7 +306,7 @@
   function observe(image,key,title){
     if(!image?.isConnected||!uid||!key||!title)return;
     const hit=cached(key);
-    if(hit){image.dataset.photoSource=hit.source;image.src=hit.url;return;}
+    if(hit){image.dataset.photoSource=hit.source;image.referrerPolicy='no-referrer';image.src=hit.url;return;}
     if(negativeFresh(key))return;
     image.dataset.photoStatus='queued';
     if('IntersectionObserver' in window){

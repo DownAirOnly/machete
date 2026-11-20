@@ -1,6 +1,6 @@
 'use strict';
 (()=>{
-  const VERSION='3.1.1', LEGACY_KEY='machete.v2', OLD='machete.v1';
+  const VERSION='3.1.2', LEGACY_KEY='machete.v2', OLD='machete.v1';
   let authUser=null;
   const storageKey=()=>authUser?'machete.v3.'+authUser.uid:null;
   const photoKey=key=>authUser?authUser.uid+'::'+key:null;
@@ -300,8 +300,16 @@
     return result.length?'<div class="product-grid">'+result.map(productCard).join('')+'</div>':
       empty('No matching products','Import your Amazon order ZIP or add a product to your watchlist.',importButton());
   }
+  function photoProgress(){
+    const p=window.MachetePhotos?.stats?.()||{};
+    if(!p.attempted&&!p.found&&!p.missing)
+      return 'Product pictures are checked automatically as you browse. Tap Settings for diagnostics.';
+    return 'Photo lookups: '+(p.matched||0)+' matched this visit, '+(p.notFound||0)+
+      ' not found, '+(p.errors||0)+' provider errors. '+(p.active||0)+' currently checking.';
+  }
   function productsView(){
-    return headline('Catalog','Products<span style="color:var(--accent)">.</span>','See every unique purchased item and your saved watchlist, with photos where available.')+
+    return headline('Catalog','Products<span style="color:var(--accent)">.</span>','Automatic photo matching now tries known ASIN images, BOGO’s verified library, and shorter product-catalog searches. Not every product has a publicly available photo.')+
+      '<p class="photo-source-hint" id="photo-progress" aria-live="polite">'+photoProgress()+'</p>'+
       section('Your product catalog',filterControls('products')+'<div id="filtered-list">'+renderProductList()+'</div>','<span class="tag">'+products().length+' products</span>')+
       section('Add a product to watch','<form id="watch-form" class="card"><div class="field"><label for="watch-url">Amazon.com product link</label><input id="watch-url" type="url" required placeholder="https://www.amazon.com/dp/..."></div><div class="actions"><button type="submit" class="button">Add to watchlist</button></div></form>');
   }
@@ -373,11 +381,16 @@
       legacyBanner()+
       section('Automatic product photos',
         '<div class="card"><h3>Matching real product packaging</h3>'+
-        '<p>Machete first checks BOGO’s existing verified photo catalog, then searches Open Food Facts and related open catalogs. Photos appear automatically as you browse. Uncertain matches are skipped.</p>'+
-        '<p class="note">'+(window.MachetePhotos?.stats?.().found||0)+' photos matched on this account so far · '+
-        (window.MachetePhotos?.stats?.().missing||0)+' unmatched or unavailable. This is not a count of all products.</p>'+
+        '<p>Machete first attempts a legacy ASIN image URL, then checks BOGO’s verified photo library and searches open product catalogs. Uncertain matches stay blank. This static website cannot reproduce BOGO’s server-side image search without a backend.</p>'+
+        '<p class="note">'+photoProgress()+'</p>'+
+        '<p class="note">Last source: '+esc(window.MachetePhotos?.stats?.().lastSource||'Not checked yet')+
+        ' · Last query: '+esc(window.MachetePhotos?.stats?.().lastQuery||'Not checked yet')+'</p>'+
+        (window.MachetePhotos?.stats?.().lastError?
+          '<p class="photo-diagnostic-error">Latest error: '+esc(window.MachetePhotos.stats().lastError)+'</p>':'')+
+        (window.MachetePhotos?.stats?.().lastSuccess?
+          '<p class="note">Latest match: '+esc(window.MachetePhotos.stats().lastSuccess)+'</p>':'')+
         '<div class="actions"><button type="button" class="button secondary" data-action="reset-photos">Retry automatic photo searches</button></div>'+
-        '<p class="note">Only product names are used in public catalog search queries. Your order IDs, dates, prices, and Google account details are not shared with photo providers. This feature uses the network and results vary by catalog.</p>'+
+        '<p class="note">For images, Amazon’s CDN receives the product ASIN, and open catalogs receive a shortened product-name query. Order IDs, dates, prices and Google login details are not included in those requests.</p>'+
         '<p class="note">Community product photos: Open Food Facts / Open Beauty Facts / Open Products Facts / Open Pet Food Facts. Source names are shown on matched product details.</p></div>')+
       section('Data and privacy',
         '<div class="card"><h3>Stored separately for each Google account</h3>'+
@@ -682,6 +695,10 @@
   $('#import-file').addEventListener('change',e=>importFile(e.target.files[0]));
   $('#image-file').addEventListener('change',e=>storePhoto(e.target.files[0],e.target.dataset.key));
   document.addEventListener('keydown',e=>{if(e.key==='Escape')overlay.innerHTML='';});
+  window.addEventListener('machete-photo-progress',()=>{
+    const progress=document.getElementById('photo-progress');
+    if(progress)progress.textContent=photoProgress();
+  });
   window.addEventListener('machete-auth-changed',()=>{
     const nextUser=window.MacheteAuth?.user||null;
     if((nextUser?.uid||null)!==(authUser?.uid||null)){

@@ -1,6 +1,6 @@
 # Machete — project context
 
-Date: 2026-11-19. Current release: **v3.1.1**.
+Date: 2026-11-19. Current release: **v3.1.2**.
 
 Repo: https://github.com/DownAirOnly/machete
 
@@ -66,3 +66,10 @@ Repo: https://github.com/DownAirOnly/machete
 - Accuracy preference: false negatives are acceptable, false positives not. Remaining missing hardware photos should motivate a future permitted image metadata backend if broad coverage is necessary.
 
 Photo-search hotfix v3.1.1: use Open Facts legacy /cgi/search.pl?search_terms=...&search_simple=1&action=process&json=1, not unsupported v2 full-text search. Keep conservative image matching and rate limit.
+
+## v3.1.2 — User reported zero photos
+- Key finding: previous attempt copied only BOGO browser fallback, not its robust build-time DuckDuckGo labeled search and caching pipeline.
+- Added verified legacy ASIN image URL attempts (Amazon image hosts), shorter Open Facts searches, less overstrict verbose-title coverage, new photo-cache namespace and visible diagnostics.
+- Exact ASIN is only sent to Amazon's image CDN as a direct image request; Open Facts receives product-name query. No order history is posted.
+- **Do not claim automatic photos reliably work without testing on the user's actual iPhone.** GitHub Pages cannot run server-side search, and many ASINs no longer support old photo URLs.
+- Future durable options: user-approved backend with product catalog API (Keepa/Amazon Associates / appropriate provider), or an isolated, private product image manifest. Never publish user purchase titles/IDs in a public repo.

@@ -2,7 +2,7 @@
 
 Mobile-first, installable Amazon purchasing-history and price-comparison PWA, designed to match the lowercase logo family of Everyday, Command, and the portfolio.
 
-**v3.1.1 — November 19, 2026**
+**v3.1.2 — November 19, 2026**
 
 ## Works now
 - Import original Amazon **Your Orders.zip** locally in the browser. Reads **Your Amazon Orders/Order History.csv**, **Digital Content Orders.csv**, and **Your Returns & Refunds/Refund Details.csv**. Supports the previous **Retail.OrderHistory.\*.csv** naming as well.
@@ -65,3 +65,13 @@ Adapted from BOGO's product-photo design with a privacy-preserving client-side a
 
 ### v3.1.1 photo-search correction
 Full-text searches use Open Facts' documented legacy /cgi/search.pl endpoint because API v2's structured search does not support keyword searching. Provider outages and limited catalog coverage can still leave placeholders.
+
+
+## v3.1.2 — No-photo recovery
+- v3.1.1 returned zero visible images in user testing. Root limitation: BOGO's high coverage comes from GitHub Actions image discovery with labeled search results, not from its browser Open Facts fallback; Machete has no equivalent server-side backend.
+- Clear the prior over-aggressive negative cache by bumping the per-account image-cache namespace. Searches no longer suppress failed products for 14 days.
+- For legacy ASINs, test two Amazon image aliases by exact ASIN with a strict image-load check. Not all products, particularly new ASINs, support those links.
+- Reduce Open Facts searches from five informative words to three, and allow precise brand + three-token matches even when Amazon listings contain additional marketing text.
+- Lower search spacing to remain within a conservative number of Open Facts searches per IP per minute. Client-side failures get short retry periods.
+- Add photo-progress counts to the Products view and provider error/query diagnostics in Settings. Manual photos retain precedence.
+- This remains an experimental best-effort browser image system. Full product-photo coverage requires an authorized backend/catalog API or privately delivered photo pack. No private order export or full purchase list is committed to GitHub.
