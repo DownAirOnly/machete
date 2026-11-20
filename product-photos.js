@@ -92,7 +92,7 @@
       if(v?.status==='found')found++;
       if(v?.status==='missing')missing++;
     }
-    return {found,missing,waiting:waiting.length,active:inflight,...diagnostics};
+    return {found,missing,amazon:Object.values(cache).filter(v=>v?.status==='found'&&/Amazon/.test(v.source||'')).length,waiting:waiting.length,active:inflight,...diagnostics};
   };
   const timeoutFetch=async(url,ms=8500)=>{
     const ctrl=new AbortController();
@@ -183,15 +183,26 @@
   }
   async function findAmazonByAsin(key){
     if(!/^[A-Z0-9]{10}$/.test(key))return null;
-    const urls=[
-      'https://images-na.ssl-images-amazon.com/images/P/'+key+'.01._SX300_.jpg',
-      'https://m.media-amazon.com/images/P/'+key+'.01._SX300_.jpg'
+    // A public ASIN does not encode the modern /images/I/ photo filename.
+    // Amazon's older /images/P/ compatibility URLs work only for some items.
+    // Try a small number of known image URL formats in two bounded waves.
+    const waves=[
+      [
+        'https://images-na.ssl-images-amazon.com/images/P/'+key+'.01._SX450_.jpg',
+        'https://m.media-amazon.com/images/P/'+key+'.01._SX450_.jpg'
+      ],
+      [
+        'https://images.amazon.com/images/P/'+key+'.01._SCLZZZZZZZ_.jpg',
+        'https://images-na.ssl-images-amazon.com/images/P/'+key+'.01.LZZZZZZZ.jpg'
+      ]
     ];
-    // Older Amazon image aliases may work; newer ASINs often have no alias.
-    const ok=await Promise.all(urls.map(u=>loadable(u,2500)));
-    const i=ok.indexOf(true);
-    return i<0?null:{status:'found',url:urls[i],source:'Amazon ASIN image',
-      sourceUrl:'https://www.amazon.com/dp/'+key,checked:Date.now(),score:100};
+    for(const urls of waves){
+      const ok=await Promise.all(urls.map(u=>loadable(u,2800)));
+      const i=ok.indexOf(true);
+      if(i>=0)return {status:'found',url:urls[i],source:'Amazon ASIN image',
+        sourceUrl:'https://www.amazon.com/dp/'+key,checked:Date.now(),score:100};
+    }
+    return null;
   }
   function catalogSource(title){
     const s=normalize(title);

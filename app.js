@@ -1,6 +1,6 @@
 'use strict';
 (()=>{
-  const VERSION='3.1.2', LEGACY_KEY='machete.v2', OLD='machete.v1';
+  const VERSION='3.1.3', LEGACY_KEY='machete.v2', OLD='machete.v1';
   let authUser=null;
   const storageKey=()=>authUser?'machete.v3.'+authUser.uid:null;
   const photoKey=key=>authUser?authUser.uid+'::'+key:null;
@@ -151,6 +151,15 @@
       const reveal=()=>{
         if(!img.isConnected||authUser?.uid!==thisUid)return;
         img.style.display='block';if(fallback)fallback.style.display='none';
+        const art=img.closest('.product-art');
+        if(art){
+          let label=art.querySelector('.photo-credit');
+          if(!label){label=document.createElement('span');label.className='photo-credit';art.append(label);}
+          label.textContent=img.dataset.manualPicture==='yes'?'Your photo':
+            /Amazon/.test(img.dataset.photoSource||'')?'Amazon photo':
+            img.dataset.photoSource?'Catalog match':'';
+          label.hidden=!label.textContent;
+        }
         if(img.dataset.photoSource){
           const label=document.getElementById('auto-photo-source');
           if(label)label.textContent='Product photo matched through '+img.dataset.photoSource+'.';
@@ -308,7 +317,7 @@
       ' not found, '+(p.errors||0)+' provider errors. '+(p.active||0)+' currently checking.';
   }
   function productsView(){
-    return headline('Catalog','Products<span style="color:var(--accent)">.</span>','Automatic photo matching now tries known ASIN images, BOGO’s verified library, and shorter product-catalog searches. Not every product has a publicly available photo.')+
+    return headline('Catalog','Products<span style="color:var(--accent)">.</span>','Amazon images are tried first using the product’s ASIN. Where Amazon’s legacy image links do not work, verified product-catalog matches are used.')+
       '<p class="photo-source-hint" id="photo-progress" aria-live="polite">'+photoProgress()+'</p>'+
       section('Your product catalog',filterControls('products')+'<div id="filtered-list">'+renderProductList()+'</div>','<span class="tag">'+products().length+' products</span>')+
       section('Add a product to watch','<form id="watch-form" class="card"><div class="field"><label for="watch-url">Amazon.com product link</label><input id="watch-url" type="url" required placeholder="https://www.amazon.com/dp/..."></div><div class="actions"><button type="submit" class="button">Add to watchlist</button></div></form>');
@@ -381,8 +390,11 @@
       legacyBanner()+
       section('Automatic product photos',
         '<div class="card"><h3>Matching real product packaging</h3>'+
-        '<p>Machete first attempts a legacy ASIN image URL, then checks BOGO’s verified photo library and searches open product catalogs. Uncertain matches stay blank. This static website cannot reproduce BOGO’s server-side image search without a backend.</p>'+
+        '<p>Amazon product photos are prioritized by exact ASIN, using multiple older Amazon image URLs. Where those URLs no longer work, BOGO and community catalog matches are shown with their source. Some products will still have no image because modern Amazon photo filenames cannot be derived from the ASIN alone.</p>'+
         '<p class="note">'+photoProgress()+'</p>'+
+        '<p class="note">Amazon-sourced images: '+(window.MachetePhotos?.stats?.().amazon||0)+
+        ' · Community catalog images: '+Math.max(0,(window.MachetePhotos?.stats?.().found||0)-
+          (window.MachetePhotos?.stats?.().amazon||0))+'</p>'+
         '<p class="note">Last source: '+esc(window.MachetePhotos?.stats?.().lastSource||'Not checked yet')+
         ' · Last query: '+esc(window.MachetePhotos?.stats?.().lastQuery||'Not checked yet')+'</p>'+
         (window.MachetePhotos?.stats?.().lastError?

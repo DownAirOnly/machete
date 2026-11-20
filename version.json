@@ -1,5 +1,5 @@
 {
-  "version": "3.1.2",
+  "version": "3.1.3",
   "releaseDate": "2026-11-19",
-  "releaseName": "Repair image matching and expose photo lookup diagnostics"
+  "releaseName": "Amazon-first ASIN images and photo source attribution"
 }

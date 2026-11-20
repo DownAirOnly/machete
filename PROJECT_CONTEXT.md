@@ -1,6 +1,6 @@
 # Machete — project context
 
-Date: 2026-11-19. Current release: **v3.1.2**.
+Date: 2026-11-19. Current release: **v3.1.3**.
 
 Repo: https://github.com/DownAirOnly/machete
 
@@ -73,3 +73,9 @@ Photo-search hotfix v3.1.1: use Open Facts legacy /cgi/search.pl?search_terms=..
 - Exact ASIN is only sent to Amazon's image CDN as a direct image request; Open Facts receives product-name query. No order history is posted.
 - **Do not claim automatic photos reliably work without testing on the user's actual iPhone.** GitHub Pages cannot run server-side search, and many ASINs no longer support old photo URLs.
 - Future durable options: user-approved backend with product catalog API (Keepa/Amazon Associates / appropriate provider), or an isolated, private product image manifest. Never publish user purchase titles/IDs in a public repo.
+
+## v3.1.3 Amazon-first image strategy
+- Added two waves of direct Amazon-owned legacy image URL patterns by ASIN; success is verified by image load and minimum dimensions.
+- Gallery displays a per-photo provenance chip, not an implicit promise the image came from Amazon. Settings shows Amazon vs catalog match counts.
+- Amazon Creators API is the current official supported image-metadata service, but eligibility/licensing restrict its use; it requires approved Associates credentials, secure server-side token management and compliance. Do not add anonymous browser calls or ship credentials in public JS. A private purchase-history app may not satisfy its advertising/marketing eligibility criteria.
+- Do not claim broad exact-photo coverage; user can provide an image URL or manual upload. An appropriately licensed product metadata provider may be needed for complete automation.

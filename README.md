@@ -2,7 +2,7 @@
 
 Mobile-first, installable Amazon purchasing-history and price-comparison PWA, designed to match the lowercase logo family of Everyday, Command, and the portfolio.
 
-**v3.1.2 — November 19, 2026**
+**v3.1.3 — November 19, 2026**
 
 ## Works now
 - Import original Amazon **Your Orders.zip** locally in the browser. Reads **Your Amazon Orders/Order History.csv**, **Digital Content Orders.csv**, and **Your Returns & Refunds/Refund Details.csv**. Supports the previous **Retail.OrderHistory.\*.csv** naming as well.
@@ -75,3 +75,11 @@ Full-text searches use Open Facts' documented legacy /cgi/search.pl endpoint bec
 - Lower search spacing to remain within a conservative number of Open Facts searches per IP per minute. Client-side failures get short retry periods.
 - Add photo-progress counts to the Products view and provider error/query diagnostics in Settings. Manual photos retain precedence.
 - This remains an experimental best-effort browser image system. Full product-photo coverage requires an authorized backend/catalog API or privately delivered photo pack. No private order export or full purchase list is committed to GitHub.
+
+
+## v3.1.3 — Amazon-first image sourcing
+- Prioritizes several legacy Amazon-owned ASIN-based image URL patterns before trying BOGO / community catalog matches.
+- The product grid now distinguishes **Amazon photo**, **Catalog match**, and **Your photo** so it is clear whether the image comes from Amazon or a different provider.
+- Settings shows how many cached photos are sourced from Amazon vs other catalogs.
+- These URL patterns are best-effort only: modern Amazon media filenames are not a function of the ASIN. Complete Amazon-hosted primary images require a properly authorized product-data source. The Amazon Creators API provides primary image metadata for approved Associates, with licensing restrictions that must be satisfied; Machete does not use it.
+- Amazon CDN image requests disclose the product's public ASIN to Amazon, not purchase history or the Google account.

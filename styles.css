@@ -44,3 +44,11 @@ a{color:var(--accent);text-decoration:none}
 .photo-source-hint{font-size:11px;line-height:1.5;color:var(--muted);margin:12px 0 0}
 .product-art .art-fallback,.thumb .art-fallback,.detail-cover .art-fallback{font-size:28px}
 .product-art img[data-photo-source],.thumb img[data-photo-source],.detail-cover img[data-photo-source]{transition:opacity .16s ease}
+
+
+/* v3.1.3 — photo provenance on product-grid cards */
+.product-art{position:relative}
+.photo-credit{position:absolute;right:7px;bottom:7px;z-index:1;
+  padding:4px 7px;border-radius:7px;background:#0f161bdd;color:#f9f9f9;
+  font-size:9px;font-weight:800;letter-spacing:.01em;pointer-events:none}
+.photo-credit[hidden]{display:none}
