@@ -810,11 +810,22 @@
   function openPhotoPicker(key){const input=$('#image-file');input.dataset.key=key;input.click();}
   async function storePhoto(file,key){
     if(!file||!key)return;
-    const owningUid=authUser?.uid;
-    if(!owningUid)return toast('Sign in before choosing a photo.');
-    try{const blob=await resizePhoto(file);if(authUser?.uid!==owningUid)return;await putPhoto(key,blob);if(authUser?.uid!==owningUid)return;state.meta[key]={...getMeta(key),imageUrl:''};save();render();toast('Product photo saved on this device.');}
+    try{await saveCanonicalPhoto(file,key);}
     catch(e){toast(e.message||'Could not save photo.');}
     finally{$('#image-file').value='';}
+  }
+  async function removeApprovedPhoto(key){
+    if(!key||!confirm('Remove the approved picture for this product?'))return;
+    try{
+      const db=await openDB();
+      await new Promise((resolve,reject)=>{
+        const tx=db.transaction('images','readwrite');
+        tx.objectStore('images').delete(photoKey(key));
+        tx.oncomplete=()=>{db.close();resolve();};
+        tx.onerror=()=>{db.close();reject(tx.error);};
+      });
+      delete state.photoCatalog[key];save();render();toast('Picture removed. Product returned to the review queue.');
+    }catch(e){toast(e.message||'Unable to remove picture.');}
   }
   document.addEventListener('click',event=>{
     const el=event.target.closest('[data-view]');if(el){navigate(el.dataset.view);return;}
