@@ -220,16 +220,19 @@
       });
       if(authUser?.uid!==owningUid)return;
       const known=new Set(photoProducts().map(p=>p.key));
+      const stored=new Set(keys.filter(k=>typeof k==='string'&&k.startsWith(owningUid+'::')).map(k=>k.slice(owningUid.length+2)));
       let changes=0;
-      for(const k of keys){
-        if(typeof k!=='string'||!k.startsWith(owningUid+'::'))continue;
-        const key=k.slice(owningUid.length+2);
-        if(known.has(key)&&!state.photoCatalog[key]){
+      for(const key of known){
+        if(stored.has(key)&&!state.photoCatalog[key]){
+          // Legacy local blobs only came from explicit photo uploads.
           state.photoCatalog[key]=photoRecord(key,'Your earlier upload');changes++;
+        }else if(!stored.has(key)&&state.photoCatalog[key]){
+          // A JSON-only restore must never claim an image is backed up locally.
+          delete state.photoCatalog[key];changes++;
         }
       }
       if(changes){save();if(view==='pictures'||view==='picture-review')render();}
-    }catch(e){console.debug('Could not index older photo uploads',e);}
+    }catch(e){console.debug('Could not reconcile stored photos',e);}
   }
   function releaseImages(){for(const u of photoUrls)URL.revokeObjectURL(u);photoUrls=[];}
   function openDB(){
@@ -776,6 +779,7 @@
       state.importedAt=new Date().toISOString();
       if(!save()){state=old;return;}
       for(const [key,photo] of imported.images||[])if(!await getPhoto(key))await putPhoto(key,photo);
+      await migrateLegacyPhotos();
       query='';year='all';kind='all';navigate('history');
       toast('Updated purchases. '+retainedOrders().length+' kept; '+excludedOrders().length+' excluded.');
     }catch(err){console.error('Machete import',err);toast(err.message||'Could not import history.');}
