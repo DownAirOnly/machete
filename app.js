@@ -262,12 +262,36 @@
     });
   }
   async function resizePhoto(file){
-    if(file.size>12000000)throw Error('Choose an image smaller than 12 MB.');
+    if(file.size>12000000)throw Error('Choose a picture smaller than 12 MB.');
     const source=await createImageBitmap(file);
-    const scale=Math.min(1,480/Math.max(source.width,source.height));
-    const c=document.createElement('canvas');c.width=Math.max(1,Math.round(source.width*scale));c.height=Math.max(1,Math.round(source.height*scale));
-    c.getContext('2d').drawImage(source,0,0,c.width,c.height);source.close?.();
-    return new Promise((resolve,reject)=>c.toBlob(blob=>blob?resolve(blob):reject(new Error('Cannot process image.')),'image/jpeg',.78));
+    try{
+      if(source.width<70||source.height<70)throw Error('Picture is too small. Use at least 70 × 70 pixels.');
+      const c=document.createElement('canvas');c.width=480;c.height=480;
+      const ctx=c.getContext('2d');ctx.fillStyle='#ffffff';ctx.fillRect(0,0,480,480);
+      const scale=Math.min(440/source.width,440/source.height),w=source.width*scale,h=source.height*scale;
+      ctx.drawImage(source,(480-w)/2,(480-h)/2,w,h);
+      return await new Promise((resolve,reject)=>c.toBlob(blob=>blob?resolve(blob):reject(Error('Cannot encode picture.')),'image/jpeg',.85));
+    }finally{source.close?.();}
+  }
+  async function saveCanonicalPhoto(file,key,source='Your upload',sourceUrl=''){
+    const owningUid=authUser?.uid;if(!owningUid||!key)throw Error('Sign in before saving a picture.');
+    const blob=await resizePhoto(file);
+    if(authUser?.uid!==owningUid)throw Error('Account changed before picture was saved.');
+    await putPhoto(key,blob);
+    if(authUser?.uid!==owningUid)throw Error('Account changed before picture was saved.');
+    state.photoCatalog[key]=photoRecord(key,source,sourceUrl);
+    state.meta[key]={...getMeta(key),imageUrl:''};
+    if(!save())throw Error('Could not save picture metadata. Export a backup or free device storage.');
+    candidateOptions=[];candidateState='idle';
+    render();toast('Approved picture saved as a standardized local copy.');
+  }
+  async function approveRemotePhoto(url,key,source,sourceUrl){
+    const safe=photoUrl(url);if(!safe)throw Error('Use a valid HTTPS picture address.');
+    const response=await fetch(safe,{mode:'cors',credentials:'omit',referrerPolicy:'no-referrer'});
+    if(!response.ok)throw Error('The image provider refused the download.');
+    const blob=await response.blob();
+    if(!blob.type.startsWith('image/'))throw Error('The supplied URL is not an image.');
+    await saveCanonicalPhoto(blob,key,source,sourceUrl);
   }
   function headline(kicker,title,sub){return '<section><p class="kicker">'+esc(kicker)+'</p><h1 class="page-title">'+title+'</h1><p class="sub">'+esc(sub)+'</p></section>';}
   function importButton(label='Import Amazon history'){return '<button type="button" class="button" data-action="import">'+esc(label)+'</button>';}
