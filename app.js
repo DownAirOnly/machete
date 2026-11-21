@@ -1,12 +1,12 @@
 'use strict';
 (()=>{
-  const VERSION='3.2.0', LEGACY_KEY='machete.v2', OLD='machete.v1';
+  const VERSION='3.3.0', LEGACY_KEY='machete.v2', OLD='machete.v1';
   let authUser=null;
   const storageKey=()=>authUser?'machete.v3.'+authUser.uid:null;
   const photoKey=key=>authUser?authUser.uid+'::'+key:null;
   const $=s=>document.querySelector(s), screen=$('#screen'), overlay=$('#overlay'), toastNode=$('#toast');
-  const emptyState=()=>({orders:[],watchlist:[],meta:{},theme:'dark',importedAt:null,returnOrderIds:[],restoredIds:[]});
-  let view='home', productKey=null, selectedOrderId=null, catalogMode='purchased', query='', year='all', kind='all', sort='recent', toastTimer=0, photoUrls=[];
+  const emptyState=()=>({orders:[],watchlist:[],meta:{},theme:'dark',importedAt:null,returnOrderIds:[],restoredIds:[],photoCatalog:{}});
+  let view='home', productKey=null, selectedOrderId=null, catalogMode='purchased', query='', year='all', kind='all', sort='recent', toastTimer=0, photoUrls=[],pictureReviewKey=null,candidateOptions=[],candidateState='idle',queueLimit=30;
   const uniqueId=()=>crypto?.randomUUID?.()||'m'+Date.now()+Math.random().toString(16).slice(2);
   const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
   const money=n=>Number.isFinite(n)?new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(n):'—';
@@ -29,6 +29,7 @@
       orders:x.orders.filter(o=>o&&typeof o.id==='string'&&typeof o.title==='string').slice(0,50000),
       watchlist:x.watchlist.filter(w=>w&&typeof w.id==='string').slice(0,3000),
       meta:x.meta&&typeof x.meta==='object'&&!Array.isArray(x.meta)?x.meta:{},
+      photoCatalog:x.photoCatalog&&typeof x.photoCatalog==='object'&&!Array.isArray(x.photoCatalog)?Object.fromEntries(Object.entries(x.photoCatalog).filter(([k,v])=>/^[A-Za-z0-9-]+$/.test(k)&&v&&v.status==='approved')):{},
       theme:x.theme==='light'?'light':'dark',importedAt:x.importedAt||null,
       returnOrderIds:Array.isArray(x.returnOrderIds)?x.returnOrderIds.filter(v=>typeof v==='string').slice(0,10000):[],
       restoredIds:Array.isArray(x.restoredIds)?x.restoredIds.filter(v=>typeof v==='string').slice(0,10000):[]
@@ -82,7 +83,7 @@
     const watches=new Map(state.watchlist.map(w=>[w.asin,w]));
     for(const w of old.watchlist)if(!watches.has(w.asin))watches.set(w.asin,w);
     state={orders:Array.from(byId.values()),watchlist:Array.from(watches.values()),
-      meta:{...old.meta,...state.meta},theme:state.theme,
+      meta:{...old.meta,...state.meta},photoCatalog:{...(old.photoCatalog||{}),...(state.photoCatalog||{})},theme:state.theme,
       importedAt:state.importedAt||old.importedAt,
       returnOrderIds:[...new Set([...(old.returnOrderIds||[]),...(state.returnOrderIds||[])])],
       restoredIds:[...new Set([...(old.restoredIds||[]),...(state.restoredIds||[])])]};
