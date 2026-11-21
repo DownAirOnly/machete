@@ -830,6 +830,8 @@
   document.addEventListener('click',event=>{
     const el=event.target.closest('[data-view]');if(el){navigate(el.dataset.view);return;}
     const pr=event.target.closest('[data-product]');if(pr){productKey=pr.dataset.product;selectedOrderId=pr.dataset.order||null;view='detail';render();window.scrollTo(0,0);return;}
+    const picture=event.target.closest('[data-picture-review]');
+    if(picture){pictureReviewKey=picture.dataset.pictureReview;candidateOptions=[];candidateState='idle';view='picture-review';render();window.scrollTo(0,0);return;}
     const catalog=event.target.closest('[data-catalog-mode]');
     if(catalog){catalogMode=catalog.dataset.catalogMode;query='';sort='recent';render();return;}
     const action=event.target.closest('[data-action]');if(action){
@@ -837,18 +839,20 @@
       if(a==='google-sign-in'){window.MacheteAuth?.signIn?.().catch(err=>toast(err.message||'Sign-in failed.'));return;}
       if(a==='sign-out'){window.MacheteAuth?.signOut?.().catch(err=>toast(err.message||'Sign-out failed.'));return;}
       if(a==='claim-history'){claimLegacy();return;}
-      if(a==='retry-image'){
-        window.MachetePhotos?.clear?.(action.dataset.id);
-        render();toast('Searching for an updated photo where available.');
+      if(a==='review-picture'){
+        pictureReviewKey=action.dataset.id;candidateOptions=[];candidateState='idle';
+        view='picture-review';render();window.scrollTo(0,0);return;
+      }
+      if(a==='more-pictures'){queueLimit+=30;render();return;}
+      if(a==='find-candidates'){findPhotoCandidates();return;}
+      if(a==='approve-candidate'){
+        const candidate=candidateOptions[Number(action.dataset.index)];
+        if(!candidate||!pictureReviewKey)return;
+        approveRemotePhoto(candidate.url,pictureReviewKey,candidate.source,candidate.sourceUrl)
+          .catch(e=>toast('Cannot store that source: '+(e.message||e)+'. Try uploading the picture.'));
         return;
       }
-      if(a==='reset-photos'){
-        if(confirm('Retry automatic image searches as you browse? Your chosen photos are not changed.')){
-          window.MachetePhotos?.clear?.();
-          render();toast('Automatic photo cache reset. Matching restarts as you browse.');
-        }
-        return;
-      }
+      if(a==='remove-approved-photo'){removeApprovedPhoto(action.dataset.id);return;}
       if(a==='dismiss-legacy'){toast('Old device data was left unchanged.');return;}
       if(!authUser)return;
       if(a==='restore-record'){
@@ -886,6 +890,12 @@
     const area=$('#filtered-list');if(area){releaseImages();area.innerHTML=view==='history'?renderHistoryList():renderProductList();attachImages();}
   });
   document.addEventListener('submit',event=>{
+    if(event.target.id==='picture-url-form'){
+      event.preventDefault();const key=pictureReviewKey,link=$('#candidate-url').value.trim();
+      if(!key)return;
+      approveRemotePhoto(link,key,'User-approved URL',link).catch(e=>toast('Could not save URL image: '+(e.message||e)+'. Use Upload from Photos.'));
+      return;
+    }
     if(event.target.id==='watch-form'){
       event.preventDefault();
       try{
@@ -901,11 +911,9 @@
       const packageUnits=num($('#package-units').value);
       const unitLabel=$('#unit-label').value.trim().slice(0,25);
       const target=num($('#target-price').value);
-      const img=$('#picture-url').value.trim();
       if($('#package-units').value&&(!Number.isFinite(packageUnits)||packageUnits<=0))return toast('Use a positive units-per-package number.');
       if($('#target-price').value&&(!Number.isFinite(target)||target<=0))return toast('Target price must be positive.');
-      if(img&&!photoUrl(img))return toast('Photo links must use a full HTTPS URL.');
-      state.meta[key]={...getMeta(key),packageUnits,unitLabel,target,imageUrl:img};
+      state.meta[key]={...getMeta(key),packageUnits,unitLabel,target};
       if(save()){render();toast('Product details saved.');}
     }
   });
@@ -923,7 +931,8 @@
       authUser=nextUser;
       window.MachetePhotos?.setUser?.(authUser?.uid||'');
       state=authUser?load():emptyState();
-      view='home';productKey=null;selectedOrderId=null;catalogMode='purchased';query='';year='all';kind='all';
+      if(authUser)migrateLegacyPhotos();
+      view='home';productKey=null;selectedOrderId=null;catalogMode='purchased';query='';year='all';kind='all';pictureReviewKey=null;candidateOptions=[];candidateState='idle';
     }
     render();
   });
@@ -931,6 +940,7 @@
     authUser=window.MacheteAuth.user||null;
     window.MachetePhotos?.setUser?.(authUser?.uid||'');
     state=authUser?load():emptyState();
+    if(authUser)migrateLegacyPhotos();
   }
   render();
   if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js?v=3').catch(console.warn));
