@@ -1,6 +1,6 @@
 # Machete — project context
 
-Date: 2026-11-20. Current release: **v3.2.0**.
+Date: 2026-11-20. Current release: **v3.3.0**.
 
 Repo: https://github.com/DownAirOnly/machete
 
@@ -91,3 +91,13 @@ Photo-search hotfix v3.1.1: use Open Facts legacy /cgi/search.pl?search_terms=..
 - History cards are entire-click surfaces, 2-line clipped titles and no visible type/order IDs/unit price. Tapping selects the specific order in the product detail.
 - Gallery "Lowest paid" uses Amazon export's total per quantity, not its unrelated Unit Price.
 - Known gap: product image coverage continues to be incomplete. Avoid additional speculative scraping approaches, prefer a licensed or properly authorized image-metadata source without exposing private purchase history.
+
+## v3.3 — Private canonical product image library
+- Normal product, history and deal views only render locally saved approved photos. Automatic image guesses were removed from normal browsing.
+- Photo metadata lives in the account-scoped photoCatalog map (key, ASIN, normalized title, optional variant, source, sourceUrl, fileName, format, dimensions, approval timestamp). Canonical JPEG bytes remain in account-namespaced IndexedDB.
+- New approvals normalize to white-background 480×480 JPEG with consistent padding and compression. Older user-uploaded images are recognized as approved; prior remote imageUrl entries do not count as permanent storage.
+- Products and Settings lead to a Needs pictures queue. Explicit Find possible pictures requests obtain candidate images from BOGO, ASIN legacy paths and Open Facts. Only approval places an image in regular views.
+- Remote hosts may block CORS image download; those images cannot be stored as a permanent copy through a static GitHub Pages app. The user can instead upload the image from Photos.
+- ZIP backup includes photoCatalog and JPG files for saved images. No cloud sync; Google account sign-in alone cannot preserve pictures across devices.
+- Never publish user's per-product catalog, purchased ASINs, images, order records, or personal history in the public repo.
+- Product history, returns filtering, unit-price and wishlist logic remain intact; 100% catalog coverage still requires sufficient permitted sources and user approval.
