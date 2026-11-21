@@ -1,6 +1,6 @@
 # Machete — project context
 
-Date: 2026-11-19. Current release: **v3.1.3**.
+Date: 2026-11-20. Current release: **v3.2.0**.
 
 Repo: https://github.com/DownAirOnly/machete
 
@@ -79,3 +79,15 @@ Photo-search hotfix v3.1.1: use Open Facts legacy /cgi/search.pl?search_terms=..
 - Gallery displays a per-photo provenance chip, not an implicit promise the image came from Amazon. Settings shows Amazon vs catalog match counts.
 - Amazon Creators API is the current official supported image-metadata service, but eligibility/licensing restrict its use; it requires approved Associates credentials, secure server-side token management and compliance. Do not add anonymous browser calls or ship credentials in public JS. A private purchase-history app may not satisfy its advertising/marketing eligibility criteria.
 - Do not claim broad exact-photo coverage; user can provide an image URL or manual upload. An appropriately licensed product metadata provider may be needed for complete automation.
+
+
+## v3.2 — Purchased-only cleanup
+- User requested removing pending, cancelled and returned/refunded items from purchase history and simplifying cards: photo, abbreviated name, paid amount, date, quantity only; detailed metadata appears after tap.
+- New retainedOrders()/excludedOrders() filtering applied consistently to Home, History, spend-by-year, unique product catalog and product detail purchases.
+- "Returned or refunded" is order-level from a return/refund dataset, **not always an exact line-item match**. When only the order ID is known (often multi-line orders), all affected items are hidden by default to meet the user's clutter preference; Settings > Review excluded records permits restoring a specific completed item.
+- Source ZIP parser now reads Returns Status.csv and Digital Returns.csv; existing Machete v3 accounts have old refund records but not these new flags until original ZIP is imported again.
+- \`state.returnOrderIds\` and \`state.restoredIds\` are UID-local, saved with v3 state, merged on import/claim and included in ZIP backup.
+- New purchased vs wishlist segmented catalog. Non-purchased watchlisted items no longer pollute Purchase History or Purchased Products.
+- History cards are entire-click surfaces, 2-line clipped titles and no visible type/order IDs/unit price. Tapping selects the specific order in the product detail.
+- Gallery "Lowest paid" uses Amazon export's total per quantity, not its unrelated Unit Price.
+- Known gap: product image coverage continues to be incomplete. Avoid additional speculative scraping approaches, prefer a licensed or properly authorized image-metadata source without exposing private purchase history.

@@ -2,7 +2,7 @@
 
 Mobile-first, installable Amazon purchasing-history and price-comparison PWA, designed to match the lowercase logo family of Everyday, Command, and the portfolio.
 
-**v3.1.3 — November 19, 2026**
+**v3.2.0 — November 20, 2026**
 
 ## Works now
 - Import original Amazon **Your Orders.zip** locally in the browser. Reads **Your Amazon Orders/Order History.csv**, **Digital Content Orders.csv**, and **Your Returns & Refunds/Refund Details.csv**. Supports the previous **Retail.OrderHistory.\*.csv** naming as well.
@@ -83,3 +83,14 @@ Full-text searches use Open Facts' documented legacy /cgi/search.pl endpoint bec
 - Settings shows how many cached photos are sourced from Amazon vs other catalogs.
 - These URL patterns are best-effort only: modern Amazon media filenames are not a function of the ASIN. Complete Amazon-hosted primary images require a properly authorized product-data source. The Amazon Creators API provides primary image metadata for approved Associates, with licensing restrictions that must be satisfied; Machete does not use it.
 - Amazon CDN image requests disclose the product's public ASIN to Amazon, not purchase history or the Google account.
+
+
+## v3.2 — Accurate retained-purchase history and concise cards
+- The Home timeline, History screen, spending totals, and Purchased product catalog now include only **completed records** from orders that have not been marked returned or refunded. Pending and cancelled items, return/refund records and return-flagged orders do not appear in the normal views.
+- **Underlying raw imported records are preserved**. Settings > Review excluded records lists filtered entries and offers an individual "Keep this item" override for completed items in return/refund-flagged orders. This is important because Amazon's return/refund exports sometimes identify only the order, not the specific item in a multi-item order. The default is to hide all items in an affected order, not claim an exact line-item match.
+- Existing imported refund rows are applied to the filter automatically. **Reimport the original Your Orders.zip** to use the separate \`Your Returns & Refunds/Returns Status.csv\` and \`Your Amazon Orders/Digital Returns.csv\` tables, which older app versions omitted. The importer merges those order flags without duplicating existing purchases.
+- History cards show only picture, short two-line title, purchase date, quantity, and total item amount. The whole card opens the product details. The tapped purchase's export unit price, original order ID, export status and other details remain in the new Purchase details section.
+- Effective paid-per-item price (exported item total / quantity) is used for purchase comparisons. This can include discounts and tax, unlike Amazon's separately exported unit-price field.
+- Purchased products and Amazon Wishlist are separate segments. Wishlist-only/pending entries no longer appear as pretend purchases. The add-to-wishlist URL form is moved into Wishlist.
+- Raw records, return flags, account-local wishlist and restore overrides are included in Machete ZIP backups; no private transaction records are committed to GitHub.
+- Image behavior is retained: verified Amazon ASIN aliases where available, then conservative catalog matches. Many images remain missing without a licensed product metadata backend; avoid claiming this fixes image coverage.

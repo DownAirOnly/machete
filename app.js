@@ -1,12 +1,12 @@
 'use strict';
 (()=>{
-  const VERSION='3.1.3', LEGACY_KEY='machete.v2', OLD='machete.v1';
+  const VERSION='3.2.0', LEGACY_KEY='machete.v2', OLD='machete.v1';
   let authUser=null;
   const storageKey=()=>authUser?'machete.v3.'+authUser.uid:null;
   const photoKey=key=>authUser?authUser.uid+'::'+key:null;
   const $=s=>document.querySelector(s), screen=$('#screen'), overlay=$('#overlay'), toastNode=$('#toast');
-  const emptyState=()=>({orders:[],watchlist:[],meta:{},theme:'dark',importedAt:null});
-  let view='home', productKey=null, query='', year='all', kind='all', sort='recent', toastTimer=0, photoUrls=[];
+  const emptyState=()=>({orders:[],watchlist:[],meta:{},theme:'dark',importedAt:null,returnOrderIds:[],restoredIds:[]});
+  let view='home', productKey=null, selectedOrderId=null, catalogMode='purchased', query='', year='all', kind='all', sort='recent', toastTimer=0, photoUrls=[];
   const uniqueId=()=>crypto?.randomUUID?.()||'m'+Date.now()+Math.random().toString(16).slice(2);
   const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
   const money=n=>Number.isFinite(n)?new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(n):'—';
@@ -29,7 +29,9 @@
       orders:x.orders.filter(o=>o&&typeof o.id==='string'&&typeof o.title==='string').slice(0,50000),
       watchlist:x.watchlist.filter(w=>w&&typeof w.id==='string').slice(0,3000),
       meta:x.meta&&typeof x.meta==='object'&&!Array.isArray(x.meta)?x.meta:{},
-      theme:x.theme==='light'?'light':'dark',importedAt:x.importedAt||null
+      theme:x.theme==='light'?'light':'dark',importedAt:x.importedAt||null,
+      returnOrderIds:Array.isArray(x.returnOrderIds)?x.returnOrderIds.filter(v=>typeof v==='string').slice(0,10000):[],
+      restoredIds:Array.isArray(x.restoredIds)?x.restoredIds.filter(v=>typeof v==='string').slice(0,10000):[]
     };
   }
   function load(){
@@ -81,7 +83,9 @@
     for(const w of old.watchlist)if(!watches.has(w.asin))watches.set(w.asin,w);
     state={orders:Array.from(byId.values()),watchlist:Array.from(watches.values()),
       meta:{...old.meta,...state.meta},theme:state.theme,
-      importedAt:state.importedAt||old.importedAt};
+      importedAt:state.importedAt||old.importedAt,
+      returnOrderIds:[...new Set([...(old.returnOrderIds||[]),...(state.returnOrderIds||[])])],
+      restoredIds:[...new Set([...(old.restoredIds||[]),...(state.restoredIds||[])])]};
     if(!save()){state=previous;return;}
     // Copy previously selected photos into this account's namespaced image store.
     const keys=new Set([...Object.keys(old.meta),
@@ -102,32 +106,49 @@
     toast('Previous history attached to your Google account'+(copied?' with '+copied+' photos':'')+'.');
   }
   function toast(msg){toastNode.textContent=msg;toastNode.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>toastNode.classList.remove('show'),3600);}
-  const isSpend=o=>o.status==='completed'||o.status==='refunded';
-  const paid=o=>o.status==='refunded'?(o.total||0):o.status==='completed'?(o.total||0):0;
-  const items=()=>state.orders.slice().sort((a,b)=>String(b.date).localeCompare(String(a.date)));
-  const getProduct=k=>state.orders.filter(o=>o.key===k&&o.kind!=='refund').sort((a,b)=>a.date.localeCompare(b.date));
+  // Preserve raw records. Return exports often identify the order but not the
+  // exact returned line item. Hide affected order lines until reviewed.
+  function flaggedOrderIds(){
+    const ids=new Set(state.returnOrderIds||[]);
+    for(const o of state.orders)
+      if(o.kind==='refund'&&o.status==='refunded'&&o.orderId)ids.add(o.orderId);
+    return ids;
+  }
+  function exclusionReason(o,flagged,restored){
+    if(o.kind==='refund')return 'Refund record';
+    if(o.status!=='completed')return o.status==='cancelled'?'Cancelled':'Not completed';
+    if(o.orderId&&flagged.has(o.orderId)&&!restored.has(o.id))return 'Returned or refunded order';
+    return '';
+  }
+  function retainedOrders(){
+    const flagged=flaggedOrderIds(),restored=new Set(state.restoredIds||[]);
+    return state.orders.filter(o=>!exclusionReason(o,flagged,restored));
+  }
+  function excludedOrders(){
+    const flagged=flaggedOrderIds(),restored=new Set(state.restoredIds||[]);
+    return state.orders.filter(o=>exclusionReason(o,flagged,restored))
+      .map(o=>({...o,exclusion:exclusionReason(o,flagged,restored)}));
+  }
+  const items=()=>retainedOrders().sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+  const getProduct=k=>retainedOrders().filter(o=>o.key===k).sort((a,b)=>a.date.localeCompare(b.date));
   const getMeta=k=>state.meta[k]||{};
   const products=()=>{
     const map=new Map();
-    for(const o of state.orders){
-      if(o.kind==='refund')continue;
+    for(const o of retainedOrders()){
       const cur=map.get(o.key)||{key:o.key,asin:o.asin,title:o.title,count:0,qty:0,last:'',prices:[],spent:0};
-      cur.count+=o.status==='completed'?1:0;
-      cur.qty+=o.status==='completed'?o.qty:0;
-      cur.last=o.date>cur.last?o.date:cur.last;
-      if(o.status==='completed'){
-        if(Number.isFinite(o.unitPrice))cur.prices.push(o.unitPrice);
-        cur.spent+=paid(o);
-      }
-      if(o.date===cur.last)cur.title=o.title;
+      cur.count++;cur.qty+=o.qty;
+      if(o.date>=cur.last){cur.last=o.date;cur.title=o.title;}
+      // Display effective item cost after discounts and item-level tax.
+      if(Number.isFinite(o.total)&&o.qty>0)cur.prices.push(o.total/o.qty);
+      cur.spent+=Number.isFinite(o.total)?o.total:0;
       map.set(o.key,cur);
-    }
-    for(const w of state.watchlist){
-      const k=productId(w.asin,w.title);
-      if(!map.has(k))map.set(k,{key:k,asin:w.asin,title:w.title,count:0,qty:0,last:'',prices:[],spent:0});
     }
     return Array.from(map.values()).sort((a,b)=>b.last.localeCompare(a.last));
   };
+  const wishlistProducts=()=>state.watchlist.map(w=>({
+    key:productId(w.asin,w.title),asin:w.asin,title:w.title,count:0,qty:0,
+    last:w.createdAt||'',prices:[],spent:0
+  })).sort((a,b)=>b.last.localeCompare(a.last));
   function syncTheme(){
     $('html').dataset.theme=state.theme;
     $('meta[name="theme-color"]').content=state.theme==='light'?'#f4f3ef':'#101416';
@@ -141,7 +162,7 @@
   function attachImages(){
     const thisUid=authUser?.uid||'';
     const titles=new Map();
-    for(const o of state.orders)if(o?.key&&!titles.has(o.key))titles.set(o.key,o.title);
+    for(const o of retainedOrders())if(o?.key&&!titles.has(o.key))titles.set(o.key,o.title);
     for(const w of state.watchlist){
       const k=productId(w.asin,w.title);
       if(!titles.has(k))titles.set(k,w.title);
@@ -236,15 +257,14 @@
   function empty(title,desc,action=''){return '<div class="empty"><h3>'+esc(title)+'</h3><p>'+esc(desc)+'</p>'+(action?'<div class="actions" style="justify-content:center">'+action+'</div>':'')+'</div>';}
   const section=(name,inside,side='')=>'<section class="section"><div class="section-head"><h2>'+esc(name)+'</h2>'+side+'</div>'+inside+'</section>';
   function moneyStats(){
-    const completed=state.orders.filter(o=>o.status==='completed');
-    const refunds=state.orders.filter(o=>o.status==='refunded');
-    return {spent:completed.reduce((t,o)=>t+(o.total||0),0)+refunds.reduce((t,o)=>t+(o.total||0),0),
-      count:completed.length,unique:new Set(completed.map(o=>o.key)).size,refunds:refunds.length};
+    const retained=retainedOrders();
+    return {spent:retained.reduce((t,o)=>t+(o.total||0),0),
+      count:retained.length,unique:new Set(retained.map(o=>o.key)).size};
   }
   function yearlyChart(){
     const sums=new Map();
-    for(const o of state.orders)if(isSpend(o)&&o.date){
-      const y=o.date.slice(0,4);sums.set(y,(sums.get(y)||0)+paid(o));
+    for(const o of retainedOrders())if(o.date){
+      const y=o.date.slice(0,4);sums.set(y,(sums.get(y)||0)+(o.total||0));
     }
     const rows=Array.from(sums).sort((a,b)=>a[0].localeCompare(b[0]));
     if(!rows.length)return '<p class="small muted">Import a history file to see your purchasing timeline.</p>';
@@ -252,36 +272,37 @@
     return rows.map(([y,value])=>'<div class="row" style="margin:9px 0;gap:11px"><span style="font-size:11px;color:var(--muted);width:36px">'+esc(y)+'</span><div style="background:var(--panel2);border-radius:6px;flex:1;height:11px;overflow:hidden"><div style="background:var(--accent);height:100%;width:'+Math.max(0,100*value/max).toFixed(1)+'%"></div></div><span style="width:75px;text-align:right;font-size:11px;font-weight:800">'+money(value)+'</span></div>').join('');
   }
   function home(){
-    const m=moneyStats(), recent=items().filter(o=>o.status==='completed').slice(0,4);
+    const m=moneyStats(), recent=items().slice(0,4);
     return '<section class="hero"><p class="kicker">Machete · '+VERSION+'</p><h1 class="page-title">Know what you paid.</h1><p class="sub">Your Amazon history, real purchase prices, and a better way to compare what things cost.</p>'+
       '<div class="actions">'+importButton(state.orders.length?'Update history':'Import your history')+'<button class="button secondary" type="button" data-view="products">Browse products</button></div></section>'+
-      '<div class="metrics"><div class="metric"><div class="metric-value">'+money(m.spent)+'</div><div class="metric-label">Net exported spend</div></div><div class="metric"><div class="metric-value">'+m.count+'</div><div class="metric-label">Completed item entries</div></div><div class="metric"><div class="metric-value">'+m.unique+'</div><div class="metric-label">Unique products bought</div></div></div>'+
-      legacyBanner()+section('Spending by year','<div class="card">'+yearlyChart()+'<p class="note">Completed retail and digital item totals, minus recorded refunds. Not a bank reconciliation.</p></div>')+
+      '<div class="metrics"><div class="metric"><div class="metric-value">'+money(m.spent)+'</div><div class="metric-label">Retained purchase spend</div></div><div class="metric"><div class="metric-value">'+m.count+'</div><div class="metric-label">Completed item entries</div></div><div class="metric"><div class="metric-value">'+m.unique+'</div><div class="metric-label">Unique products bought</div></div></div>'+
+      legacyBanner()+section('Spending by year','<div class="card">'+yearlyChart()+'<p class="note">Completed purchases, excluding return-flagged orders. Amazon item totals can include taxes and discounts. Not a bank reconciliation.</p></div>')+
       section('Recent purchases',recent.length?'<div class="history-list">'+recent.map(historyCard).join('')+'</div>':empty('Your history is empty','Import the original Amazon Your Orders.zip file directly. It stays in this browser.',importButton()),'<button class="button quiet" data-view="history">View all</button>')+
       section('Import progress','<div class="card"><h3>'+(state.importedAt?'Last imported '+esc(shortDate(state.importedAt)):'Ready for your first import')+'</h3><p>Import an updated file whenever you receive one. Previous entries are deduplicated, so you keep a rolling history without OCR.</p><div class="actions">'+importButton('Choose ZIP or CSV')+'</div></div>');
   }
   function historyCard(o){
-    const label=o.status==='refunded'?'Refund':o.status==='cancelled'?'Cancelled':o.status==='pending'?'Pending':o.kind==='digital'?'Digital':'Purchase';
-    return '<article class="card history-item">'+image(o.key)+
-      '<div class="history-info"><h3 class="history-title"><button type="button" data-product="'+esc(o.key)+'">'+esc(o.title)+'</button></h3>'+
-      '<div class="history-meta">'+esc(shortDate(o.date))+' · '+esc(label)+' · qty '+esc(o.qty)+
-      (Number.isFinite(o.unitPrice)?'<br>Amazon unit price '+money(o.unitPrice):'')+
-      (o.orderId?'<br>Order '+esc(o.orderId):'')+'</div></div>'+
-      '<div class="history-amount'+(o.status==='refunded'?' refund':'')+'">'+money(o.total)+'<span>'+esc(o.kind)+'</span></div></article>';
+    // Entire card opens the item. Metadata is intentionally kept in details.
+    return '<button type="button" class="card history-item history-card" data-order="'+esc(o.id)+'" data-product="'+esc(o.key)+'">'+
+      image(o.key)+
+      '<div class="history-info"><h3 class="history-title">'+esc(o.title)+'</h3>'+
+      '<div class="history-meta">'+esc(shortDate(o.date))+' · Qty '+esc(o.qty)+'</div></div>'+
+      '<div class="history-amount">'+money(o.total)+'</div></button>';
   }
   function getFilteredHistory(){
     const q=slug(query);
-    return items().filter(o=>(year==='all'||o.date.startsWith(year))&&(kind==='all'||o.kind===kind)&&(!q||slug(o.title+' '+o.asin+' '+o.orderId).includes(q)));
+    return items().filter(o=>(year==='all'||o.date.startsWith(year))&&
+      (kind==='all'||o.kind===kind)&&
+      (!q||slug(o.title+' '+o.asin+' '+o.orderId).includes(q)));
   }
   function filterControls(type){
-    const years=Array.from(new Set(state.orders.map(x=>x.date.slice(0,4)).filter(Boolean))).sort().reverse();
+    const years=Array.from(new Set(retainedOrders().map(x=>x.date.slice(0,4)).filter(Boolean))).sort().reverse();
     return '<div class="toolbar"><input type="search" id="search" placeholder="Search products or orders" value="'+esc(query)+'" aria-label="Search history">'+
       (type==='history'?'<select id="year-filter" aria-label="Filter by year"><option value="all">All years</option>'+years.map(y=>'<option '+(year===y?'selected':'')+' value="'+esc(y)+'">'+esc(y)+'</option>').join('')+'</select>'+
-      '<select id="kind-filter" aria-label="Filter by type"><option value="all">All types</option>'+[['retail','Retail'],['digital','Digital'],['refund','Refund']].map(([v,label])=>'<option '+(kind===v?'selected':'')+' value="'+v+'">'+label+'</option>').join('')+'</select>':'<select id="sort-products" aria-label="Sort products"><option value="recent" '+(sort==='recent'?'selected':'')+'>Recent</option><option value="name" '+(sort==='name'?'selected':'')+'>Name</option><option value="spent" '+(sort==='spent'?'selected':'')+'>Most spent</option><option value="repeat" '+(sort==='repeat'?'selected':'')+'>Most bought</option></select>')+'</div>';
+      '<select id="kind-filter" aria-label="Filter by type"><option value="all">All types</option>'+[['retail','Retail'],['digital','Digital']].map(([v,label])=>'<option '+(kind===v?'selected':'')+' value="'+v+'">'+label+'</option>').join('')+'</select>':'<select id="sort-products" aria-label="Sort products"><option value="recent" '+(sort==='recent'?'selected':'')+'>Recent</option><option value="name" '+(sort==='name'?'selected':'')+'>Name</option><option value="spent" '+(sort==='spent'?'selected':'')+'>Most spent</option><option value="repeat" '+(sort==='repeat'?'selected':'')+'>Most bought</option></select>')+'</div>';
   }
   function history(){
-    return headline('Your records','Purchase history<span style="color:var(--accent)">.</span>','Every exported item, refund, and recorded purchase price — not a continuous Amazon market price feed.')+
-      section('All entries',filterControls('history')+'<div id="filtered-list">'+renderHistoryList()+'</div>','<span class="tag">'+state.orders.length+' records</span>')+
+    return headline('Your records','Purchase history<span style="color:var(--accent)">.</span>','Completed purchases only. Pending, cancelled, returned and refunded orders are kept out of this view.')+
+      section('All entries',filterControls('history')+'<div id="filtered-list">'+renderHistoryList()+'</div>','<span class="tag">'+retainedOrders().length+' purchases</span>')+
       section('Rolling updates','<div class="card"><h3>Update without duplicates</h3><p>Reimport Amazon’s newer order ZIP when it is available. Machete compares each entry to those already saved.</p><div class="actions">'+importButton('Import newer export')+'</div></div>');
   }
   function renderHistoryList(){
@@ -289,16 +310,35 @@
     return result.length?'<p class="note" style="margin:0 0 10px">'+result.length+' matching entries</p><div class="history-list">'+result.map(historyCard).join('')+'</div>':
       empty('No matching orders','Change your filters or import your Amazon purchase history.',!state.orders.length?importButton():'');
   }
+  function reviewExcluded(){
+    const rows=excludedOrders().sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+    const returnIds=flaggedOrderIds();
+    const reviewable=rows.filter(o=>o.status==='completed'&&o.orderId&&returnIds.has(o.orderId));
+    return '<button class="back" type="button" data-view="settings">‹ Back to Settings</button>'+
+      headline('Record review','Excluded orders<span style="color:var(--accent)">.</span>',
+        'These raw export entries are hidden from purchase history, charts and your purchased-products catalog.')+
+      '<div class="card"><h3>'+rows.length+' hidden records · '+reviewable.length+' completed entries in flagged orders</h3>'+
+      '<p>Refund and return exports can name an order without specifying which item was returned. The app hides the entire flagged order to avoid showing a returned item as purchased. You can restore individual completed items below.</p>'+
+      '<p>Nothing has been deleted from your saved import or backups. Reimporting the original Amazon ZIP helps identify more returns.</p></div>'+
+      section('Review entries',rows.length?'<div class="excluded-list">'+rows.map(o=>
+        '<div class="card excluded-card"><div class="excluded-details"><h3>'+esc(o.title)+'</h3>'+
+        '<p>'+esc(shortDate(o.date))+' · '+esc(o.exclusion)+' · Qty '+esc(o.qty)+
+        ' · '+money(o.total)+'</p></div>'+
+        (o.status==='completed'&&o.kind!=='refund'?
+          '<button class="button secondary" type="button" data-action="restore-record" data-id="'+esc(o.id)+'">Keep this item</button>':'')+
+        '</div>').join('')+'</div>':
+        empty('Nothing excluded','All imported entries currently qualify as retained purchases.'));
+  }
   function productCard(p){
     const meta=getMeta(p.key), target=Number.isFinite(meta.target)?meta.target:null, lowest=p.prices.length?Math.min(...p.prices):null;
     const picture=image(p.key,'product-art');
     return '<button type="button" class="product-card" data-product="'+esc(p.key)+'">'+picture+'<div class="product-content">'+
-      '<div class="product-name">'+esc(p.title)+'</div><div class="product-stat">'+(lowest!=null?'Lowest paid '+money(lowest):'Not purchased yet')+'</div>'+
-      '<div class="product-caption">'+(p.count?p.count+' purchase'+(p.count===1?'':'s'):'Watchlist')+(target!=null?' · Target '+money(target):'')+'</div></div></button>';
+      '<div class="product-name">'+esc(p.title)+'</div><div class="product-stat">'+(lowest!=null?'Lowest paid '+money(lowest):'Wishlist item')+'</div>'+
+      '<div class="product-caption">'+(p.count?p.count+' purchase'+(p.count===1?'':'s'):'Saved on wishlist')+(target!=null?' · Target '+money(target):'')+'</div></div></button>';
   }
   function getFilteredProducts(){
     const q=slug(query);
-    const arr=products().filter(p=>!q||slug(p.title+' '+p.asin).includes(q));
+    const arr=(catalogMode==='wishlist'?wishlistProducts():products()).filter(p=>!q||slug(p.title+' '+p.asin).includes(q));
     if(sort==='name')arr.sort((a,b)=>a.title.localeCompare(b.title));
     if(sort==='spent')arr.sort((a,b)=>b.spent-a.spent);
     if(sort==='repeat')arr.sort((a,b)=>b.count-a.count);
@@ -307,7 +347,7 @@
   function renderProductList(){
     const result=getFilteredProducts();
     return result.length?'<div class="product-grid">'+result.map(productCard).join('')+'</div>':
-      empty('No matching products','Import your Amazon order ZIP or add a product to your watchlist.',importButton());
+      empty(catalogMode==='wishlist'?'Wishlist is empty':'No matching purchases',catalogMode==='wishlist'?'Add an Amazon product link below to save it for later.':'Only completed, non-returned purchases appear here.',catalogMode==='wishlist'?'':importButton());
   }
   function photoProgress(){
     const p=window.MachetePhotos?.stats?.()||{};
@@ -317,48 +357,71 @@
       ' not found, '+(p.errors||0)+' provider errors. '+(p.active||0)+' currently checking.';
   }
   function productsView(){
-    return headline('Catalog','Products<span style="color:var(--accent)">.</span>','Amazon images are tried first using the product’s ASIN. Where Amazon’s legacy image links do not work, verified product-catalog matches are used.')+
+    const wishlist=catalogMode==='wishlist';
+    return headline('Catalog','Products<span style="color:var(--accent)">.</span>',
+      wishlist?'Saved Amazon products, separate from your purchase history.':
+      'Only completed, retained purchases. Photos load automatically where matches are available.')+
+      '<div class="catalog-switch" role="group" aria-label="Product view">'+
+      '<button type="button" class="'+(!wishlist?'selected':'')+'" data-catalog-mode="purchased">Purchased</button>'+
+      '<button type="button" class="'+(wishlist?'selected':'')+'" data-catalog-mode="wishlist">Wishlist ('+state.watchlist.length+')</button></div>'+
       '<p class="photo-source-hint" id="photo-progress" aria-live="polite">'+photoProgress()+'</p>'+
-      section('Your product catalog',filterControls('products')+'<div id="filtered-list">'+renderProductList()+'</div>','<span class="tag">'+products().length+' products</span>')+
-      section('Add a product to watch','<form id="watch-form" class="card"><div class="field"><label for="watch-url">Amazon.com product link</label><input id="watch-url" type="url" required placeholder="https://www.amazon.com/dp/..."></div><div class="actions"><button type="submit" class="button">Add to watchlist</button></div></form>');
+      section(wishlist?'Saved for later':'Purchased products',
+        filterControls('products')+'<div id="filtered-list">'+renderProductList()+'</div>',
+        '<span class="tag">'+(wishlist?wishlistProducts().length:products().length)+' products</span>')+
+      (wishlist?section('Add to wishlist',
+        '<form id="watch-form" class="card"><div class="field"><label for="watch-url">Amazon product link</label>'+
+        '<input id="watch-url" type="url" required placeholder="https://www.amazon.com/dp/..."></div>'+
+        '<div class="actions"><button type="submit" class="button">Save product</button></div></form>'):'');
   }
   function trendChart(rows){
-    const pts=rows.filter(x=>x.status==='completed'&&Number.isFinite(x.unitPrice)&&x.date);
+    const pts=rows.filter(x=>Number.isFinite(x.total)&&x.qty>0&&x.date);
     if(!pts.length)return '<div class="chart-empty">No purchase-price observations for this product.</div>';
-    const w=620,h=220,pad=27, values=pts.map(x=>x.unitPrice);
+    const w=620,h=220,pad=27, values=pts.map(x=>x.total/x.qty);
     const minValue=Math.min(...values),maxValue=Math.max(...values),range=Math.max(.01,maxValue-minValue),yMin=Math.max(0,minValue-range*.16),yMax=maxValue+range*.16;
     const times=pts.map(x=>new Date(x.date).getTime()).map(x=>Number.isFinite(x)?x:0);
     const start=Math.min(...times),end=Math.max(...times);
     const xx=x=>pad+(end===start?(w-2*pad)/2:(x-start)/(end-start)*(w-2*pad));
     const yy=v=>pad+(1-(v-yMin)/(yMax-yMin))*(h-2*pad);
-    const coords=pts.map((x,i)=>[xx(times[i]),yy(x.unitPrice)]);
+    const coords=pts.map((x,i)=>[xx(times[i]),yy(x.total/x.qty)]);
     const line=coords.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
-    return '<div class="chart"><p class="chart-label">Price paid per sold item (before tax)</p>'+
+    return '<div class="chart"><p class="chart-label">Effective paid amount per item (Amazon item total ÷ quantity)</p>'+
       '<svg viewBox="0 0 '+w+' '+h+'" role="img" aria-label="Prices paid on purchase dates"><path d="M'+pad+','+(h-pad)+'H'+(w-pad)+'" stroke="var(--line)" fill="none"/>'+
       '<path d="M'+pad+','+pad+'V'+(h-pad)+'" stroke="var(--line)" fill="none"/>'+
       '<text x="3" y="'+(pad+3)+'" font-size="11" fill="var(--muted)">'+esc(money(maxValue))+'</text>'+
       '<text x="3" y="'+(h-8)+'" font-size="11" fill="var(--muted)">'+esc(money(minValue))+'</text>'+
       (pts.length>1?'<path d="'+line+'" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linejoin="round"/>':'')+
-      pts.map((x,i)=>'<circle cx="'+coords[i][0].toFixed(1)+'" cy="'+coords[i][1].toFixed(1)+'" r="5" fill="var(--accent)"><title>'+esc(shortDate(x.date)+' · '+money(x.unitPrice))+'</title></circle>').join('')+'</svg>'+
+      pts.map((x,i)=>'<circle cx="'+coords[i][0].toFixed(1)+'" cy="'+coords[i][1].toFixed(1)+'" r="5" fill="var(--accent)"><title>'+esc(shortDate(x.date)+' · '+money(x.total/x.qty))+'</title></circle>').join('')+'</svg>'+
       '<div class="chart-footer"><span>'+esc(shortDate(pts[0].date))+'</span><span>'+esc(shortDate(pts[pts.length-1].date))+'</span></div></div>'+
       '<p class="note">Dots represent purchases only. No price is inferred between orders.</p>';
   }
+  function purchaseDetails(o){
+    const row=(label,value)=>'<div class="purchase-detail-row"><span>'+esc(label)+'</span><strong>'+esc(value)+'</strong></div>';
+    return row('Date',shortDate(o.date))+
+      row('Quantity',String(o.qty))+
+      row('Amount paid',money(o.total))+
+      row('Amazon export unit price',money(o.unitPrice))+
+      row('Order number',o.orderId||'Unavailable')+
+      row('Type',o.kind)+row('Export status',o.status)+
+      '<p class="note">The Amazon export’s unit price may differ from the amount actually charged after discounts or tax. This view preserves the original values.</p>';
+  }
   function details(){
-    const rows=getProduct(productKey),p=products().find(p=>p.key===productKey), w=state.watchlist.find(x=>productId(x.asin,x.title)===productKey);
+    const rows=getProduct(productKey),p=products().find(p=>p.key===productKey)||wishlistProducts().find(p=>p.key===productKey), w=state.watchlist.find(x=>productId(x.asin,x.title)===productKey);
     if(!p)return productsView();
-    const meta=getMeta(productKey),lowest=rows.filter(o=>o.status==='completed'&&Number.isFinite(o.unitPrice));
-    const last=lowest.length?lowest[lowest.length-1].unitPrice:null;
-    const min=lowest.length?Math.min(...lowest.map(o=>o.unitPrice)):null;
+    const meta=getMeta(productKey),lowest=rows.filter(o=>Number.isFinite(o.total)&&o.qty>0);
+    const last=lowest.length?lowest[lowest.length-1].total/lowest[lowest.length-1].qty:null;
+    const min=lowest.length?Math.min(...lowest.map(o=>o.total/o.qty)):null;
+    const chosen=rows.find(o=>o.id===selectedOrderId)||rows[rows.length-1]||null;
     const per=Number(meta.packageUnits)>0&&last!=null?last/Number(meta.packageUnits):null;
     return '<button type="button" class="back" data-view="products">‹ Back to products</button>'+
       '<div class="detail-heading">'+image(p.key,'detail-cover')+'<div><h1>'+esc(meta.displayName||p.title)+'</h1>'+
-      '<p>'+(p.asin?'ASIN '+esc(p.asin):'Imported title only')+' · '+(p.count||0)+' completed purchases</p>'+
+      '<p>'+(p.asin?'ASIN '+esc(p.asin):'Imported title only')+' · '+(p.count||0)+' retained purchase'+(p.count===1?'':'s')+'</p>'+
       (amazonUrl(p.asin)?'<a class="small" target="_blank" rel="noopener noreferrer" href="'+amazonUrl(p.asin)+'">View on Amazon</a>':'')+'</div></div>'+
-      '<div class="detail-metrics"><div class="detail-stat"><b>'+money(min)+'</b><span>Lowest price you paid (pre-tax)</span></div>'+
-      '<div class="detail-stat"><b>'+money(last)+'</b><span>Last purchase price (pre-tax)</span></div>'+
+      '<div class="detail-metrics"><div class="detail-stat"><b>'+money(min)+'</b><span>Lowest per-item cost recorded</span></div>'+
+      '<div class="detail-stat"><b>'+money(last)+'</b><span>Last per-item cost recorded</span></div>'+
       '<div class="detail-stat"><b>'+money(per)+'</b><span>Last price per '+esc(meta.unitLabel||'contained unit')+'</span></div>'+
       '<div class="detail-stat"><b>'+money(p.spent)+'</b><span>Total recorded spend on item</span></div></div>'+
       section('Price paid over time','<div class="card">'+trendChart(rows)+'</div>')+
+      (chosen?section('Purchase details','<div class="card">'+purchaseDetails(chosen)+'</div>'):'')+
       '<p id="auto-photo-source" class="photo-source-hint">'+
       (window.MachetePhotos?.attribution?.(productKey)?.source?
         'Product photo matched through '+esc(window.MachetePhotos.attribution(productKey).source)+'.':
@@ -371,10 +434,12 @@
       '<div class="field wide"><label for="picture-url">Product photo URL (optional)</label><input type="url" id="picture-url" value="'+esc(meta.imageUrl||'')+'" placeholder="https://..."></div></div>'+
       '<div class="actions"><button type="submit" class="button">Save details</button><button type="button" class="button secondary" data-action="image-upload" data-id="'+esc(p.key)+'">Choose a photo</button><button type="button" class="button secondary" data-action="retry-image" data-id="'+esc(p.key)+'">Retry auto photo</button></div>'+
       '<p class="note">Amazon exports do not provide catalog images. Machete searches BOGO’s verified photo library and open product catalogs using product names only, and shows results only when names match. Your uploaded photos always take priority.</p></form>')+
-      section('Purchase records',rows.length?'<div class="history-list">'+rows.map(historyCard).join('')+'</div>':empty('Not purchased yet','This item is on your watchlist. Its actual market price is not tracked yet.'));
+      section('Purchase records',rows.length?'<div class="history-list">'+rows.map(historyCard).join('')+'</div>':
+        empty('Not in your purchase history','This product is saved to your separate wishlist.'))+
+      (w?'<div class="actions"><button type="button" class="button danger" data-action="remove-watch" data-id="'+esc(p.key)+'">Remove from wishlist</button></div>':'');
   }
   function deals(){
-    const targets=products().filter(p=>Number.isFinite(getMeta(p.key).target)||state.watchlist.some(w=>productId(w.asin,w.title)===p.key&&Number.isFinite(w.target)));
+    const targets=[...products(),...wishlistProducts()].filter(p=>Number.isFinite(getMeta(p.key).target)||state.watchlist.some(w=>productId(w.asin,w.title)===p.key&&Number.isFinite(w.target))).filter((p,i,all)=>all.findIndex(q=>q.key===p.key)===i);
     return headline('Comparison','Deals<span style="color:var(--accent)">.</span>','Target prices are your preferences. They are not current Amazon prices or verified discounts.')+
       section('Target prices',targets.length?'<div class="product-grid">'+targets.map(productCard).join('')+'</div>':empty('No targets yet','Open a product to set your preferred purchase price.'))+
       section('Market history — planned','<div class="card"><h3>Real historical pricing needs a separate source</h3><p>The Amazon order export only records what you bought. An authenticated historical-price provider is needed for daily price histories, deals, alerts, and automatic product photos.</p><p>For now, Machete does not invent a current price or present a guess as a bargain.</p></div>');
@@ -388,6 +453,11 @@
         '<div class="actions"><button type="button" class="button secondary" data-action="sign-out">Sign out</button></div>'+
         '<p class="note">This is an account-gated local app, not cloud storage. Your purchase history remains on this device and is not encrypted. Signing out hides it, but does not erase it.</p></div>')+
       legacyBanner()+
+      section('Purchase history filtering',
+        '<div class="card"><h3>'+retainedOrders().length+' purchases shown · '+excludedOrders().length+' entries hidden</h3>'+
+        '<p>Pending, cancelled, returned and refunded orders are kept out of the normal purchase history and catalog. Original records are preserved for auditing and backups.</p>'+
+        '<div class="actions"><button type="button" class="button secondary" data-view="excluded">Review excluded records</button></div>'+
+        '<p class="note">Refund data already imported is used immediately. Reimport your original Amazon ZIP to apply its separate Returns Status and Digital Returns files, which older Machete versions did not read.</p></div>')+
       section('Automatic product photos',
         '<div class="card"><h3>Matching real product packaging</h3>'+
         '<p>Amazon product photos are prioritized by exact ASIN, using multiple older Amazon image URLs. Where those URLs no longer work, BOGO and community catalog matches are shown with their source. Some products will still have no image because modern Amazon photo filenames cannot be derived from the ASIN alone.</p>'+
@@ -432,13 +502,13 @@
       '</section>';
   }
   function navigate(next){
-    view=next;productKey=null;query='';year='all';kind='all';sort='recent';render();
+    view=next;productKey=null;selectedOrderId=null;query='';year='all';kind='all';sort='recent';render();
     window.scrollTo({top:0,behavior:'instant'});
   }
   function render(){
     syncTheme();releaseImages();
     const loggedIn=!!authUser && !!window.MacheteAuth?.user;
-    screen.innerHTML=loggedIn?({home,history,products:productsView,deals,settings,detail:details}[view]||home)():loginView();
+    screen.innerHTML=loggedIn?({home,history,products:productsView,deals,settings,detail:details,excluded:reviewExcluded}[view]||home)():loginView();
     const nav=document.querySelector('.tabbar');
     nav.hidden=!loggedIn;
     document.querySelectorAll('.tab').forEach(el=>{
@@ -543,6 +613,8 @@
     const orderName=find(/(?:^|\/)(?:Order History|Retail\.OrderHistory\.\d+)\.csv$/i);
     const digitalName=find(/(?:^|\/)Digital Content Orders\.csv$/i);
     const refundName=find(/(?:^|\/)Refund Details\.csv$/i);
+    const returnsName=find(/(?:^|\/)Returns Status\.csv$/i);
+    const digitalReturnsName=find(/(?:^|\/)Digital Returns\.csv$/i);
     if(!orderName&&!digitalName)throw Error('Could not find Amazon Order History.csv in this ZIP.');
     async function readName(n){
       if(!n)return [];
@@ -553,7 +625,17 @@
     const retail=parseRetail(await readName(orderName));
     const digital=parseDigital(await readName(digitalName));
     const refunds=parseRefunds(await readName(refundName),retail);
-    return {records:[...retail,...digital,...refunds],backup:null,images:[]};
+    const physicalReturns=await readName(returnsName);
+    const digitalReturns=await readName(digitalReturnsName);
+    const returnedIds=[...new Set([
+      ...physicalReturns.filter(r=>
+        !/expired/i.test(r['Return Receivable State']||'') &&
+        /refund|exchange/i.test(r['Return Resolution']||'')
+      ).map(r=>r['Order ID']),
+      ...digitalReturns.filter(r=>/complete|success/i.test(r['Return Status']||'')||
+        /true|yes/i.test(r['Processing Successful']||'')).map(r=>r['Order ID'])
+    ].filter(Boolean))];
+    return {records:[...retail,...digital,...refunds],returnOrderIds:returnedIds,backup:null,images:[]};
   }
   function mergeRecords(records){
     const index=new Map(state.orders.map(o=>[o.id,o]));
@@ -584,9 +666,15 @@
       const old=JSON.parse(JSON.stringify(state));
       const merged=mergeRecords(imported.records);
       state.orders=merged.orders;
+      const returnedFromImport=Array.isArray(imported.returnOrderIds)?imported.returnOrderIds:[];
+      state.returnOrderIds=[...new Set([...(state.returnOrderIds||[]),...returnedFromImport])];
       if(imported.backup){
         const b=imported.backup;
         state.meta={...state.meta,...(b.meta&&typeof b.meta==='object'?b.meta:{})};
+        if(Array.isArray(b.returnOrderIds))
+          state.returnOrderIds=[...new Set([...state.returnOrderIds,...b.returnOrderIds.filter(x=>typeof x==='string')])];
+        if(Array.isArray(b.restoredIds))
+          state.restoredIds=[...new Set([...(state.restoredIds||[]),...b.restoredIds.filter(x=>typeof x==='string')])];
         if(Array.isArray(b.watchlist)){
           const byAsin=new Map(state.watchlist.map(x=>[x.asin,x]));
           for(const w of b.watchlist)if(w&&asinOk(w.asin)&&!byAsin.has(w.asin))byAsin.set(w.asin,w);
@@ -597,7 +685,7 @@
       if(!save()){state=old;return;}
       for(const [key,photo] of imported.images||[])await putPhoto(key,photo);
       query='';year='all';kind='all';navigate('history');
-      toast('Imported '+merged.added+' new entries; '+(state.orders.length)+' total.');
+      toast('Updated purchases. '+retainedOrders().length+' kept; '+excludedOrders().length+' excluded.');
     }catch(err){console.error('Machete import',err);toast(err.message||'Could not import history.');}
     finally{$('#import-file').value='';}
   }
@@ -607,7 +695,7 @@
     try{
       if(!window.JSZip)throw Error('ZIP support unavailable. Refresh the page.');
       const zip=new JSZip();
-      zip.file('machete.json',JSON.stringify({app:'machete',version:VERSION,exportedAt:new Date().toISOString(),orders:state.orders,watchlist:state.watchlist,meta:state.meta},null,2));
+      zip.file('machete.json',JSON.stringify({app:'machete',version:VERSION,exportedAt:new Date().toISOString(),orders:state.orders,watchlist:state.watchlist,meta:state.meta,returnOrderIds:state.returnOrderIds,restoredIds:state.restoredIds},null,2));
       const keys=Object.keys(state.meta).filter(k=>/^[A-Z0-9a-z-]+$/.test(k)).slice(0,1000);
       for(const key of keys){
         const image=await getPhoto(key).catch(()=>null);
@@ -638,7 +726,9 @@
   }
   document.addEventListener('click',event=>{
     const el=event.target.closest('[data-view]');if(el){navigate(el.dataset.view);return;}
-    const pr=event.target.closest('[data-product]');if(pr){productKey=pr.dataset.product;view='detail';render();window.scrollTo(0,0);return;}
+    const pr=event.target.closest('[data-product]');if(pr){productKey=pr.dataset.product;selectedOrderId=pr.dataset.order||null;view='detail';render();window.scrollTo(0,0);return;}
+    const catalog=event.target.closest('[data-catalog-mode]');
+    if(catalog){catalogMode=catalog.dataset.catalogMode;query='';sort='recent';render();return;}
     const action=event.target.closest('[data-action]');if(action){
       const a=action.dataset.action;
       if(a==='google-sign-in'){window.MacheteAuth?.signIn?.().catch(err=>toast(err.message||'Sign-in failed.'));return;}
@@ -658,6 +748,18 @@
       }
       if(a==='dismiss-legacy'){toast('Old device data was left unchanged.');return;}
       if(!authUser)return;
+      if(a==='restore-record'){
+        const target=state.orders.find(o=>o.id===action.dataset.id);
+        if(!target||target.status!=='completed'||target.kind==='refund')return;
+        state.restoredIds=[...new Set([...(state.restoredIds||[]),target.id])];
+        if(save()){render();toast('Selected item restored to purchases.');}
+        return;
+      }
+      if(a==='remove-watch'){
+        state.watchlist=state.watchlist.filter(w=>productId(w.asin,w.title)!==action.dataset.id);
+        if(save()){catalogMode='wishlist';navigate('products');toast('Removed from wishlist.');}
+        return;
+      }
       if(a==='import')$('#import-file').click();
       if(a==='backup')exportBackup();
       if(a==='image-upload')openPhotoPicker(action.dataset.id);
@@ -718,7 +820,7 @@
       authUser=nextUser;
       window.MachetePhotos?.setUser?.(authUser?.uid||'');
       state=authUser?load():emptyState();
-      view='home';productKey=null;query='';year='all';kind='all';
+      view='home';productKey=null;selectedOrderId=null;catalogMode='purchased';query='';year='all';kind='all';
     }
     render();
   });
