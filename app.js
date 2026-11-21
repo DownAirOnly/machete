@@ -155,65 +155,81 @@
     $('meta[name="theme-color"]').content=state.theme==='light'?'#f4f3ef':'#101416';
   }
   function image(k,klass=''){
-    const meta=getMeta(k), url=photoUrl(meta.imageUrl);
     return '<div class="'+(klass||'thumb')+'" data-image-wrap="'+esc(k)+'">'+
       '<span class="art-fallback" aria-hidden="true">m.</span>'+
-      '<img alt="" loading="eager" style="display:none" data-img-key="'+esc(k)+'" '+(url?'data-remote-img="'+esc(url)+'"':'')+'></div>';
+      '<img alt="" loading="eager" style="display:none" data-img-key="'+esc(k)+'"></div>';
+  }
+  function photoProducts(){
+    const map=new Map();
+    for(const p of [...products(),...wishlistProducts()])if(!map.has(p.key))map.set(p.key,p);
+    return [...map.values()];
+  }
+  function photoCounts(){
+    const rows=photoProducts(),approved=rows.filter(p=>state.photoCatalog[p.key]?.status==='approved').length;
+    return {approved,total:rows.length,missing:rows.length-approved};
+  }
+  function photoRecord(key,source,sourceUrl=''){
+    const product=photoProducts().find(p=>p.key===key),now=new Date().toISOString();
+    return {status:'approved',key,asin:product?.asin||'',normalizedTitle:slug(product?.title||''),
+      variant:String(getMeta(key).variant||''),source,sourceUrl:photoUrl(sourceUrl),fileName:key+'.jpg',
+      format:'image/jpeg',width:480,height:480,approvedAt:state.photoCatalog[key]?.approvedAt||now,
+      updatedAt:now,storage:'local-indexeddb'};
   }
   function attachImages(){
-    const thisUid=authUser?.uid||'';
-    const titles=new Map();
-    for(const o of retainedOrders())if(o?.key&&!titles.has(o.key))titles.set(o.key,o.title);
-    for(const w of state.watchlist){
-      const k=productId(w.asin,w.title);
-      if(!titles.has(k))titles.set(k,w.title);
-    }
+    const owningUid=authUser?.uid||'';
     for(const img of document.querySelectorAll('[data-img-key]')){
-      const key=img.dataset.imgKey, fallback=img.parentElement.querySelector('.art-fallback');
-      const reveal=()=>{
-        if(!img.isConnected||authUser?.uid!==thisUid)return;
+      const key=img.dataset.imgKey,fallback=img.parentElement.querySelector('.art-fallback');
+      img.addEventListener('load',()=>{
+        if(!img.isConnected||authUser?.uid!==owningUid)return;
         img.style.display='block';if(fallback)fallback.style.display='none';
         const art=img.closest('.product-art');
         if(art){
           let label=art.querySelector('.photo-credit');
           if(!label){label=document.createElement('span');label.className='photo-credit';art.append(label);}
-          label.textContent=img.dataset.manualPicture==='yes'?'Your photo':
-            /Amazon/.test(img.dataset.photoSource||'')?'Amazon photo':
-            img.dataset.photoSource?'Catalog match':'';
-          label.hidden=!label.textContent;
+          label.textContent='Approved';label.hidden=false;
         }
-        if(img.dataset.photoSource){
-          const label=document.getElementById('auto-photo-source');
-          if(label)label.textContent='Product photo matched through '+img.dataset.photoSource+'.';
-        }
-      };
-      img.addEventListener('load',reveal);
-      img.addEventListener('error',()=>{
-        img.style.display='none';
-        if(fallback)fallback.style.display='block';
-        if(img.dataset.photoSource){
-          window.MachetePhotos?.clear?.(key);
-          delete img.dataset.photoSource;
+        if(view==='detail'&&productKey===key){
+          const label=$('#auto-photo-source');
+          if(label)label.textContent='Approved image · '+(state.photoCatalog[key]?.source||'Your photo')+'. Saved locally and included in ZIP backups.';
         }
       });
-      if(img.dataset.remoteImg){
-        img.dataset.manualPicture='yes';
-        img.referrerPolicy='no-referrer';
-        img.src=img.dataset.remoteImg;
-      }else getPhoto(key).then(blob=>{
-        if(!img.isConnected||authUser?.uid!==thisUid)return;
-        if(blob){
-          img.dataset.manualPicture='yes';
-          const url=URL.createObjectURL(blob);
-          photoUrls.push(url);img.src=url;
-        }else{
-          window.MachetePhotos?.observe?.(img,key,titles.get(key)||'');
+      img.addEventListener('error',()=>{img.style.display='none';if(fallback)fallback.style.display='block';});
+      getPhoto(key).then(blob=>{
+        if(!img.isConnected||authUser?.uid!==owningUid)return;
+        if(!blob){
+          if(state.photoCatalog[key]){delete state.photoCatalog[key];save();}
+          return;
         }
-      }).catch(()=>{
-        if(img.isConnected&&authUser?.uid===thisUid)
-          window.MachetePhotos?.observe?.(img,key,titles.get(key)||'');
-      });
+        if(!state.photoCatalog[key]){
+          // Previous IndexedDB pictures were explicitly uploaded by the user.
+          state.photoCatalog[key]=photoRecord(key,'Your earlier upload');save();
+          const progress=$('#photo-progress');if(progress)progress.textContent=photoProgress();
+        }
+        const url=URL.createObjectURL(blob);photoUrls.push(url);img.src=url;
+      }).catch(()=>{});
     }
+  }
+  async function migrateLegacyPhotos(){
+    const owningUid=authUser?.uid;if(!owningUid)return;
+    try{
+      const db=await openDB();
+      const keys=await new Promise((resolve,reject)=>{
+        const tx=db.transaction('images','readonly'),req=tx.objectStore('images').getAllKeys();
+        req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error);
+        tx.oncomplete=()=>db.close();
+      });
+      if(authUser?.uid!==owningUid)return;
+      const known=new Set(photoProducts().map(p=>p.key));
+      let changes=0;
+      for(const k of keys){
+        if(typeof k!=='string'||!k.startsWith(owningUid+'::'))continue;
+        const key=k.slice(owningUid.length+2);
+        if(known.has(key)&&!state.photoCatalog[key]){
+          state.photoCatalog[key]=photoRecord(key,'Your earlier upload');changes++;
+        }
+      }
+      if(changes){save();if(view==='pictures'||view==='picture-review')render();}
+    }catch(e){console.debug('Could not index older photo uploads',e);}
   }
   function releaseImages(){for(const u of photoUrls)URL.revokeObjectURL(u);photoUrls=[];}
   function openDB(){
