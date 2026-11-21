@@ -391,11 +391,68 @@
       empty(catalogMode==='wishlist'?'Wishlist is empty':'No matching purchases',catalogMode==='wishlist'?'Add an Amazon product link below to save it for later.':'Only completed, non-returned purchases appear here.',catalogMode==='wishlist'?'':importButton());
   }
   function photoProgress(){
-    const p=window.MachetePhotos?.stats?.()||{};
-    if(!p.attempted&&!p.found&&!p.missing)
-      return 'Product pictures are checked automatically as you browse. Tap Settings for diagnostics.';
-    return 'Photo lookups: '+(p.matched||0)+' matched this visit, '+(p.notFound||0)+
-      ' not found, '+(p.errors||0)+' provider errors. '+(p.active||0)+' currently checking.';
+    const p=photoCounts();
+    return p.approved+' of '+p.total+' products have approved local pictures · '+p.missing+' need pictures.';
+  }
+  function pictureQueue(){
+    const p=photoCounts(),missing=photoProducts().filter(x=>state.photoCatalog[x.key]?.status!=='approved');
+    const rows=missing.length?
+      '<div class="picture-queue">'+missing.slice(0,queueLimit).map(x=>
+        '<button type="button" class="picture-queue-row" data-picture-review="'+esc(x.key)+'">'+
+        '<span class="picture-queue-fallback">m.</span><span class="picture-queue-copy"><strong>'+esc(x.title)+'</strong>'+
+        '<small>'+esc(x.asin||'Title-based product')+'</small></span><span class="picture-queue-link">Review ›</span></button>').join('')+'</div>':
+      empty('All current products have pictures','Newly imported products will appear here until you approve a picture.');
+    const more=missing.length>queueLimit?
+      '<div class="actions"><button class="button secondary" data-action="more-pictures">Show more ('+(missing.length-queueLimit)+' left)</button></div>':'';
+    return '<button type="button" class="back" data-view="products">‹ Back to products</button>'+
+      headline('Picture library','Needs pictures<span style="color:var(--accent)">.</span>',
+        'Only approved, locally stored product pictures appear in your history.')+
+      '<div class="photo-progress-card"><strong>'+p.approved+' / '+p.total+'</strong><span>approved products</span>'+
+      '<div class="photo-progress-track"><span style="width:'+(p.total?Math.round(p.approved/p.total*100):100)+'%"></span></div></div>'+
+      section('Unresolved products',rows+more)+
+      '<p class="note">Pictures stay on this device under your Google account. Export a ZIP backup before moving devices or clearing Safari data.</p>';
+  }
+  function pictureReview(){
+    const p=photoProducts().find(x=>x.key===pictureReviewKey);
+    if(!p)return pictureQueue();
+    const record=state.photoCatalog[p.key];
+    const suggestions=candidateOptions.map((c,i)=>
+      '<div class="picture-candidate"><div class="picture-candidate-art"><img src="'+esc(c.url)+'" loading="lazy" referrerpolicy="no-referrer" alt="Candidate picture '+(i+1)+'"></div>'+
+      '<div class="picture-candidate-info"><strong>'+esc(c.source)+'</strong><span>'+esc(c.title||'Candidate · check size and label')+'</span></div>'+
+      '<button class="button" data-action="approve-candidate" data-index="'+i+'">Approve</button></div>').join('');
+    const feedback=candidateState==='loading'?'<p class="note">Checking public sources. No result is applied automatically.</p>':
+      candidateState==='empty'?'<p class="note">No plausible candidates found. Upload a picture or provide a direct image link.</p>':
+      candidateState==='error'?'<p class="note">Catalog unavailable. You can retry or upload a picture.</p>':
+      candidateState==='loaded'?'<div class="picture-candidates">'+suggestions+'</div>':
+      '<p class="note">Candidates are suggestions only. Nothing is saved until you approve it.</p>';
+    return '<button type="button" class="back" data-view="pictures">‹ Back to missing pictures</button>'+
+      headline('Image review','Select a picture<span style="color:var(--accent)">.</span>',
+        'Check the exact product, variation, count and packaging before approving.')+
+      '<div class="card"><h3>'+esc(p.title)+'</h3><p>'+esc(p.asin?'ASIN '+p.asin:'No ASIN available')+'</p>'+
+      '<div class="actions"><button class="button secondary" data-action="image-upload" data-id="'+esc(p.key)+'">Upload from Photos</button>'+
+      (record?'<button class="button danger" data-action="remove-approved-photo" data-id="'+esc(p.key)+'">Remove approved picture</button>':'')+'</div>'+
+      (record?'<p class="note">Approved: '+esc(record.source||'Your upload')+' · '+esc(shortDate(record.approvedAt))+'</p>':
+        '<p class="note">No approved picture yet. This product displays the neutral placeholder.</p>')+'</div>'+
+      section('Suggested matches','<div class="card"><div class="actions"><button type="button" class="button secondary" data-action="find-candidates" '+(candidateState==='loading'?'disabled':'')+'>'+
+        (candidateState==='loading'?'Looking for candidates…':'Find possible pictures')+'</button></div>'+feedback+'</div>')+
+      section('Direct picture URL','<form class="card" id="picture-url-form">'+
+        '<div class="field"><label for="candidate-url">HTTPS image link</label><input id="candidate-url" type="url" required placeholder="https://…"></div>'+
+        '<div class="actions"><button type="submit" class="button secondary">Approve and store</button></div>'+
+        '<p class="note">The source must permit browser downloads to save a permanent local copy. If it blocks downloads, use Upload from Photos instead.</p></form>');
+  }
+  async function findPhotoCandidates(){
+    const key=pictureReviewKey,owningUid=authUser?.uid,p=photoProducts().find(x=>x.key===key);
+    if(!p||!owningUid)return;
+    candidateState='loading';candidateOptions=[];render();
+    try{
+      const results=await window.MachetePhotos.candidates(p.asin,p.title);
+      if(authUser?.uid!==owningUid||pictureReviewKey!==key||view!=='picture-review')return;
+      candidateOptions=results;candidateState=results.length?'loaded':'empty';render();
+    }catch(e){
+      if(authUser?.uid===owningUid&&pictureReviewKey===key&&view==='picture-review'){
+        candidateState='error';render();toast(e.message||'Unable to search candidates.');
+      }
+    }
   }
   function productsView(){
     const wishlist=catalogMode==='wishlist';
