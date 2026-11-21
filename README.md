@@ -94,3 +94,9 @@ Full-text searches use Open Facts' documented legacy /cgi/search.pl endpoint bec
 - Purchased products and Amazon Wishlist are separate segments. Wishlist-only/pending entries no longer appear as pretend purchases. The add-to-wishlist URL form is moved into Wishlist.
 - Raw records, return flags, account-local wishlist and restore overrides are included in Machete ZIP backups; no private transaction records are committed to GitHub.
 - Image behavior is retained: verified Amazon ASIN aliases where available, then conservative catalog matches. Many images remain missing without a licensed product metadata backend; avoid claiming this fixes image coverage.
+
+### Product picture catalog (v3.3)
+
+Machete shows product images in normal cards only once they are approved and stored locally. Open **Products → Review missing pictures**, choose an unresolved product, and upload a picture or explicitly request candidate suggestions. Approved images are normalized to padded 480×480 JPEG and stored in browser IndexedDB; provenance and approval records live in account-scoped local storage. Use **Settings → Export complete backup** to save the catalog with its image files. If a remote image blocks browser downloads, upload a copy through Photos instead.
+
+Google sign-in does not sync the image library, and the public repository includes no personal product catalog or purchase history.
