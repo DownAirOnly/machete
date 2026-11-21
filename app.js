@@ -759,6 +759,10 @@
       if(imported.backup){
         const b=imported.backup;
         state.meta={...state.meta,...(b.meta&&typeof b.meta==='object'?b.meta:{})};
+        if(b.photoCatalog&&typeof b.photoCatalog==='object'){
+          const approved=normalizeState({...emptyState(),photoCatalog:b.photoCatalog}).photoCatalog;
+          state.photoCatalog={...approved,...state.photoCatalog};
+        }
         if(Array.isArray(b.returnOrderIds))
           state.returnOrderIds=[...new Set([...state.returnOrderIds,...b.returnOrderIds.filter(x=>typeof x==='string')])];
         if(Array.isArray(b.restoredIds))
@@ -771,7 +775,7 @@
       }
       state.importedAt=new Date().toISOString();
       if(!save()){state=old;return;}
-      for(const [key,photo] of imported.images||[])await putPhoto(key,photo);
+      for(const [key,photo] of imported.images||[])if(!await getPhoto(key))await putPhoto(key,photo);
       query='';year='all';kind='all';navigate('history');
       toast('Updated purchases. '+retainedOrders().length+' kept; '+excludedOrders().length+' excluded.');
     }catch(err){console.error('Machete import',err);toast(err.message||'Could not import history.');}
@@ -783,8 +787,8 @@
     try{
       if(!window.JSZip)throw Error('ZIP support unavailable. Refresh the page.');
       const zip=new JSZip();
-      zip.file('machete.json',JSON.stringify({app:'machete',version:VERSION,exportedAt:new Date().toISOString(),orders:state.orders,watchlist:state.watchlist,meta:state.meta,returnOrderIds:state.returnOrderIds,restoredIds:state.restoredIds},null,2));
-      const keys=Object.keys(state.meta).filter(k=>/^[A-Z0-9a-z-]+$/.test(k)).slice(0,1000);
+      zip.file('machete.json',JSON.stringify({app:'machete',version:VERSION,exportedAt:new Date().toISOString(),orders:state.orders,watchlist:state.watchlist,meta:state.meta,photoCatalog:state.photoCatalog,returnOrderIds:state.returnOrderIds,restoredIds:state.restoredIds},null,2));
+      const keys=[...new Set([...Object.keys(state.photoCatalog),...Object.keys(state.meta)])].filter(k=>/^[A-Z0-9a-z-]+$/.test(k)).slice(0,1000);
       for(const key of keys){
         const image=await getPhoto(key).catch(()=>null);
         if(image)zip.file('photos/'+key+'.jpg',image);
