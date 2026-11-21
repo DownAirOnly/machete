@@ -458,11 +458,12 @@
     const wishlist=catalogMode==='wishlist';
     return headline('Catalog','Products<span style="color:var(--accent)">.</span>',
       wishlist?'Saved Amazon products, separate from your purchase history.':
-      'Only completed, retained purchases. Photos load automatically where matches are available.')+
+      'Only completed, retained purchases. Only your approved pictures appear.')+
       '<div class="catalog-switch" role="group" aria-label="Product view">'+
       '<button type="button" class="'+(!wishlist?'selected':'')+'" data-catalog-mode="purchased">Purchased</button>'+
       '<button type="button" class="'+(wishlist?'selected':'')+'" data-catalog-mode="wishlist">Wishlist ('+state.watchlist.length+')</button></div>'+
       '<p class="photo-source-hint" id="photo-progress" aria-live="polite">'+photoProgress()+'</p>'+
+      '<div class="actions"><button type="button" class="button secondary" data-view="pictures">Review missing pictures</button></div>'+
       section(wishlist?'Saved for later':'Purchased products',
         filterControls('products')+'<div id="filtered-list">'+renderProductList()+'</div>',
         '<span class="tag">'+(wishlist?wishlistProducts().length:products().length)+' products</span>')+
@@ -521,17 +522,17 @@
       section('Price paid over time','<div class="card">'+trendChart(rows)+'</div>')+
       (chosen?section('Purchase details','<div class="card">'+purchaseDetails(chosen)+'</div>'):'')+
       '<p id="auto-photo-source" class="photo-source-hint">'+
-      (window.MachetePhotos?.attribution?.(productKey)?.source?
-        'Product photo matched through '+esc(window.MachetePhotos.attribution(productKey).source)+'.':
-        'Automatic photos appear for verified matches. You can override them below.')+
-      '</p>'+
+      (state.photoCatalog[productKey]?'Approved image · '+esc(state.photoCatalog[productKey].source||'Your upload')+'.':
+        'No approved image. Unverified matches will not appear in your history.')+'</p>'+
       section('Package and picture','<form id="meta-form" class="card"><div class="form-grid">'+
       '<div class="field"><label for="package-units">Units inside one purchased item</label><input type="number" id="package-units" min=".01" max="1000000" step="any" inputmode="decimal" value="'+esc(meta.packageUnits||'')+'" placeholder="e.g. 24"></div>'+
       '<div class="field"><label for="unit-label">Unit label</label><input id="unit-label" maxlength="25" value="'+esc(meta.unitLabel||'')+'" placeholder="bottle, oz, count…"></div>'+
       '<div class="field"><label for="target-price">Your target price per purchased item</label><input type="number" id="target-price" min=".01" max="1000000" step=".01" inputmode="decimal" value="'+esc(meta.target||w?.target||'')+'" placeholder="$"></div>'+
-      '<div class="field wide"><label for="picture-url">Product photo URL (optional)</label><input type="url" id="picture-url" value="'+esc(meta.imageUrl||'')+'" placeholder="https://..."></div></div>'+
-      '<div class="actions"><button type="submit" class="button">Save details</button><button type="button" class="button secondary" data-action="image-upload" data-id="'+esc(p.key)+'">Choose a photo</button><button type="button" class="button secondary" data-action="retry-image" data-id="'+esc(p.key)+'">Retry auto photo</button></div>'+
-      '<p class="note">Amazon exports do not provide catalog images. Machete searches BOGO’s verified photo library and open product catalogs using product names only, and shows results only when names match. Your uploaded photos always take priority.</p></form>')+
+      '</div>'+
+      '<div class="actions"><button type="submit" class="button">Save details</button>'+
+      '<button type="button" class="button secondary" data-action="review-picture" data-id="'+esc(p.key)+'">Review pictures</button>'+
+      '<button type="button" class="button secondary" data-action="image-upload" data-id="'+esc(p.key)+'">Upload a picture</button></div>'+
+      '<p class="note">Only approved pictures are shown. New uploads are normalized and included in ZIP backups.</p></form>')+
       section('Purchase records',rows.length?'<div class="history-list">'+rows.map(historyCard).join('')+'</div>':
         empty('Not in your purchase history','This product is saved to your separate wishlist.'))+
       (w?'<div class="actions"><button type="button" class="button danger" data-action="remove-watch" data-id="'+esc(p.key)+'">Remove from wishlist</button></div>':'');
@@ -556,22 +557,11 @@
         '<p>Pending, cancelled, returned and refunded orders are kept out of the normal purchase history and catalog. Original records are preserved for auditing and backups.</p>'+
         '<div class="actions"><button type="button" class="button secondary" data-view="excluded">Review excluded records</button></div>'+
         '<p class="note">Refund data already imported is used immediately. Reimport your original Amazon ZIP to apply its separate Returns Status and Digital Returns files, which older Machete versions did not read.</p></div>')+
-      section('Automatic product photos',
-        '<div class="card"><h3>Matching real product packaging</h3>'+
-        '<p>Amazon product photos are prioritized by exact ASIN, using multiple older Amazon image URLs. Where those URLs no longer work, BOGO and community catalog matches are shown with their source. Some products will still have no image because modern Amazon photo filenames cannot be derived from the ASIN alone.</p>'+
-        '<p class="note">'+photoProgress()+'</p>'+
-        '<p class="note">Amazon-sourced images: '+(window.MachetePhotos?.stats?.().amazon||0)+
-        ' · Community catalog images: '+Math.max(0,(window.MachetePhotos?.stats?.().found||0)-
-          (window.MachetePhotos?.stats?.().amazon||0))+'</p>'+
-        '<p class="note">Last source: '+esc(window.MachetePhotos?.stats?.().lastSource||'Not checked yet')+
-        ' · Last query: '+esc(window.MachetePhotos?.stats?.().lastQuery||'Not checked yet')+'</p>'+
-        (window.MachetePhotos?.stats?.().lastError?
-          '<p class="photo-diagnostic-error">Latest error: '+esc(window.MachetePhotos.stats().lastError)+'</p>':'')+
-        (window.MachetePhotos?.stats?.().lastSuccess?
-          '<p class="note">Latest match: '+esc(window.MachetePhotos.stats().lastSuccess)+'</p>':'')+
-        '<div class="actions"><button type="button" class="button secondary" data-action="reset-photos">Retry automatic photo searches</button></div>'+
-        '<p class="note">For images, Amazon’s CDN receives the product ASIN, and open catalogs receive a shortened product-name query. Order IDs, dates, prices and Google login details are not included in those requests.</p>'+
-        '<p class="note">Community product photos: Open Food Facts / Open Beauty Facts / Open Products Facts / Open Pet Food Facts. Source names are shown on matched product details.</p></div>')+
+      section('Approved product pictures',
+        '<div class="card"><h3>'+photoProgress()+'</h3>'+
+        '<p>Product images are never chosen automatically. Review candidates once, or upload a photo, and Machete will reuse the approved local copy.</p>'+
+        '<div class="actions"><button type="button" class="button" data-view="pictures">Review missing pictures</button></div>'+
+        '<p class="note">The catalog and local photos are backed up together. Google sign-in does not sync either between devices. Product-name searches only happen when you tap Find possible pictures; Amazon may receive an ASIN for image checks.</p></div>')+
       section('Data and privacy',
         '<div class="card"><h3>Stored separately for each Google account</h3>'+
         '<p>Amazon exports are processed in this browser. The source ZIP, shipping addresses and payment fields are not retained or uploaded. Automatic Firebase cloud sync is not enabled.</p>'+
@@ -606,7 +596,7 @@
   function render(){
     syncTheme();releaseImages();
     const loggedIn=!!authUser && !!window.MacheteAuth?.user;
-    screen.innerHTML=loggedIn?({home,history,products:productsView,deals,settings,detail:details,excluded:reviewExcluded}[view]||home)():loginView();
+    screen.innerHTML=loggedIn?({home,history,products:productsView,deals,settings,detail:details,excluded:reviewExcluded,pictures:pictureQueue,'picture-review':pictureReview}[view]||home)():loginView();
     const nav=document.querySelector('.tabbar');
     nav.hidden=!loggedIn;
     document.querySelectorAll('.tab').forEach(el=>{
